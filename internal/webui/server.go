@@ -36,6 +36,7 @@ type Server struct {
 	autoreply *autoreply.Engine
 	loginMgr    *LoginManager
 	asrInstaller *ASRInstaller
+	depInstaller *DepInstaller
 
 	tmpl *template.Template
 	mux  *http.ServeMux
@@ -66,6 +67,7 @@ func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Poo
 		autoreply: ar,
 		loginMgr:     NewLoginManager(cfg, pool, logger),
 		asrInstaller: NewASRInstaller(),
+		depInstaller: NewDepInstaller(),
 		tmpl:      tmpl,
 		mux:       http.NewServeMux(),
 	}
@@ -131,6 +133,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/asr/install", s.withAuth(s.handleAPIASRInstall))
 	s.mux.HandleFunc("/api/asr/install/status", s.withAuth(s.handleAPIASRInstallStatus))
 	s.mux.HandleFunc("/api/asr/environment", s.withAuth(s.handleAPIASREnvironment))
+	s.mux.HandleFunc("/api/asr/deps/install", s.withAuth(s.handleAPIDepsInstall))
+	s.mux.HandleFunc("/api/asr/deps/status", s.withAuth(s.handleAPIDepsStatus))
 
 	// 根路径重定向
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

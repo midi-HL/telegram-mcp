@@ -95,7 +95,16 @@ h2 { font-size: 15px; margin: 0 0 12px; color: var(--text2); font-weight: 500; }
 .table .empty { color: var(--text2); text-align: center; padding: 24px; }
 
 /* 表单 */
-input[type=text], input[type=password] {
+/* 所有输入控件统一深色样式 */
+input[type=text],
+input[type=password],
+input[type=number],
+input[type=tel],
+input[type=email],
+input[type=url],
+input[type=search],
+select,
+textarea {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -103,8 +112,56 @@ input[type=text], input[type=password] {
   padding: 8px 10px;
   font-size: 14px;
   font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s;
 }
-input:focus { outline: none; border-color: var(--accent); }
+
+input::placeholder, textarea::placeholder {
+  color: var(--text2);
+  opacity: 0.6;
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: #3a424e;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+input:disabled, select:disabled, textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* select 下拉箭头 */
+select {
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa4b2' stroke-width='2'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 16px;
+  padding-right: 32px;
+}
+
+select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* 数字输入框去掉 spinner */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] { -moz-appearance: textfield; }
 
 button {
   background: var(--accent);
@@ -236,3 +293,106 @@ code {
   height: 100%; background: var(--accent); width: 0%;
   transition: width 0.3s ease;
 }
+
+/* ===== 页面标题 ===== */
+.page-head { margin-bottom: 20px; }
+.page-head h1 { margin: 0 0 4px; }
+.page-sub { color: var(--text2); font-size: 13px; margin: 0; }
+
+/* ===== 状态卡片网格 ===== */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.status-card.ok { border-color: rgba(34,197,94,0.4); }
+.status-card.missing { border-color: rgba(245,158,11,0.4); }
+.status-icon { font-size: 22px; line-height: 1; }
+.status-body { flex: 1; min-width: 0; }
+.status-name { font-size: 12px; color: var(--text2); margin-bottom: 2px; }
+.status-value { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-card.ok .status-value { color: var(--ok); }
+.status-card.missing .status-value { color: var(--warn); }
+
+/* ===== 卡片头部 ===== */
+.card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px;
+}
+.card-head h2 { margin: 0; font-size: 15px; color: var(--text); font-weight: 600; }
+.badge-soft {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: var(--surface2); color: var(--text2);
+}
+
+/* ===== 模型网格 ===== */
+.model-grid { display: grid; gap: 10px; }
+.model-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 8px;
+  transition: border-color 0.15s;
+}
+.model-card:hover { border-color: #3a424e; }
+.model-main { flex: 1; min-width: 0; }
+.model-title { font-size: 14px; color: var(--text); font-weight: 500; }
+.model-meta { font-size: 12px; color: var(--text2); margin-top: 3px; }
+.model-tag {
+  font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(59,130,246,0.15); color: var(--accent); margin-left: 6px;
+}
+
+/* ===== 表单布局 ===== */
+.form-grid { display: flex; flex-direction: column; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 13px; color: var(--text2); font-weight: 500; }
+.field-hint { font-size: 11px; color: var(--text2); opacity: 0.75; margin: 0; }
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; }
+.field-narrow { flex: 0 0 120px !important; }
+
+.field-group {
+  padding: 16px; border: 1px solid var(--border);
+  border-radius: 8px; background: rgba(255,255,255,0.015);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.field-group[hidden] { display: none; }
+.group-title {
+  font-size: 12px; color: var(--text2); text-transform: uppercase;
+  letter-spacing: 0.5px; font-weight: 600;
+}
+
+.form-actions {
+  display: flex; align-items: center; gap: 12px;
+  padding-top: 4px; border-top: 1px solid var(--border);
+}
+.form-msg { font-size: 13px; }
+.form-msg.ok { color: var(--ok); }
+.form-msg.err { color: var(--danger); }
+
+/* ===== 安装面板 ===== */
+.install-card { border-color: rgba(59,130,246,0.4); }
+.install-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; font-size: 13px;
+}
+.install-pct { color: var(--accent); font-variant-numeric: tabular-nums; }
+.install-steps {
+  margin-top: 10px; font-size: 11px; color: var(--text2);
+  max-height: 120px; overflow-y: auto;
+  font-family: ui-monospace, monospace; line-height: 1.7;
+}
+.install-steps div { white-space: pre-wrap; word-break: break-all; }
+
+/* ===== 小按钮 ===== */
+.btn-sm { padding: 5px 12px; font-size: 12px; border-radius: 6px; }

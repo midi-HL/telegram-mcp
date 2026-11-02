@@ -621,3 +621,56 @@ func (s *Server) handleAPIASREnvironment(w http.ResponseWriter, r *http.Request)
 	env := CheckEnvironment(modelDir, cliPath)
 	writeJSON(w, http.StatusOK, env)
 }
+
+
+// handleAPIDepsInstall 启动依赖安装（ffmpeg / sherpa）。
+func (s *Server) handleAPIDepsInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "方法不允许"})
+		return
+	}
+	var req struct {
+		Kind string `json:"kind"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
+		return
+	}
+	if s.depInstaller == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "安装器未初始化"})
+		return
+	}
+	kind := DepKind(req.Kind)
+	if kind != DepFFmpeg && kind != DepSherpa {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "kind 必须是 ffmpeg 或 sherpa",
+		})
+		return
+	}
+	if err := s.depInstaller.Start(r.Context(), kind, s.cfg.DataDir, s.logger); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": s.depInstaller.State()})
+}
+
+// handleAPIDepsStatus 查询依赖安装进度。
+func (s *Server) handleAPIDepsStatus(w http.ResponseWriter, r *http.Request) {
+	if s.depInstaller == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "安装器未初始化"})
+		return
+	}
+	st := s.depInstaller.State()
+	// 安装成功后自动写回配置
+	if st.Phase == "done" && st.Installed != "" {
+		switch st.Kind {
+		case DepFFmpeg:
+			s.cfg.ASR.FFmpegPath = st.Installed
+			_ = s.cfg.Save()
+		case DepSherpa:
+			s.cfg.ASR.CLIPath = st.Installed
+			_ = s.cfg.Save()
+		}
+	}
+	writeJSON(w, http.StatusOK, st)
+}

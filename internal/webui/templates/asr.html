@@ -1,77 +1,132 @@
 {{define "asr.html"}}{{template "layout" .}}{{end}}
 
 {{define "content-asr"}}
-<h1>语音转写（ASR）</h1>
-
-<div class="card">
-  <h2>环境检测</h2>
-  <div id="env-check" class="stats">检测中…</div>
-  <div id="env-notes" class="hint" style="margin-top:8px"></div>
+<div class="page-head">
+  <h1>语音转写</h1>
+  <p class="page-sub">把 Telegram 语音消息转成文字。支持离线模型或云端 API。</p>
 </div>
 
-<div class="card">
-  <h2>当前配置</h2>
-  <table class="table">
-    <tr><th>后端</th><td><code id="asr-backend">{{.Data.Backend}}</code></td></tr>
-    <tr><th>模型目录</th><td><code id="asr-model-dir">{{.Data.ModelDir}}</code></td></tr>
-    <tr><th>CLI 路径</th><td><code id="asr-cli">{{.Data.CLIPath}}</code></td></tr>
-    <tr><th>模型状态</th><td id="asr-model-status">{{if .Data.ModelFound}}<span class="ok">✅ 已找到</span>{{else}}<span class="warn">❌ 未找到</span>{{end}}</td></tr>
-    <tr><th>CLI 状态</th><td id="asr-cli-status">{{if .Data.CLIFound}}<span class="ok">✅ 已找到</span>{{else}}<span class="warn">❌ 未找到</span>{{end}}</td></tr>
-  </table>
-  <p class="hint">
-    路径优先级：环境变量 <code>TGMCP_ASR_MODEL_DIR</code> / <code>TGMCP_ASR_CLI</code>
-    &gt; 此处配置 &gt; 默认目录
-  </p>
-</div>
-
-<div class="card">
-  <h2>一键下载模型</h2>
-  <p class="hint">下载并解压到 <code>{{.Data.DataDir}}/models/</code>。已有部署请直接用下方「修改配置」填路径。</p>
-  <div id="model-list" class="model-list">加载中…</div>
-
-  <div id="install-progress" hidden style="margin-top:16px">
-    <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-    <p class="hint" id="progress-text">准备中…</p>
-    <button id="install-cancel" class="btn-ghost">关闭</button>
+<!-- 状态总览 -->
+<div class="status-grid" id="status-grid">
+  <div class="status-card" data-dep="ffmpeg">
+    <div class="status-icon">🎬</div>
+    <div class="status-body">
+      <div class="status-name">FFmpeg</div>
+      <div class="status-value" id="st-ffmpeg">检测中…</div>
+    </div>
+    <button class="btn-sm" id="btn-install-ffmpeg" hidden>安装</button>
   </div>
-  <div id="install-error" class="error" hidden></div>
+
+  <div class="status-card" data-dep="sherpa">
+    <div class="status-icon">🧠</div>
+    <div class="status-body">
+      <div class="status-name">Sherpa CLI</div>
+      <div class="status-value" id="st-sherpa">检测中…</div>
+    </div>
+    <button class="btn-sm" id="btn-install-sherpa" hidden>安装</button>
+  </div>
+
+  <div class="status-card" data-dep="model">
+    <div class="status-icon">📦</div>
+    <div class="status-body">
+      <div class="status-name">识别模型</div>
+      <div class="status-value" id="st-model">检测中…</div>
+    </div>
+  </div>
 </div>
 
+<!-- 安装进度（统一） -->
+<div class="card install-card" id="install-panel" hidden>
+  <div class="install-head">
+    <span id="install-title">安装中…</span>
+    <span class="install-pct" id="install-pct">0%</span>
+  </div>
+  <div class="progress-bar"><div class="progress-fill" id="install-fill"></div></div>
+  <div class="install-steps" id="install-steps"></div>
+  <button class="btn-ghost btn-sm" id="install-close">关闭</button>
+</div>
+
+<!-- 模型下载 -->
 <div class="card">
-  <h2>修改配置</h2>
-  <form id="asr-form" class="stack-form">
-    <label>后端
-      <select id="asr-form-backend">
-        <option value="none">none（不转写）</option>
-        <option value="sherpa">sherpa（离线，需模型+CLI）</option>
-        <option value="openai">openai（Whisper API）</option>
-        <option value="native">native（直接给模型音频）</option>
+  <div class="card-head">
+    <h2>下载识别模型</h2>
+    <span class="hint">离线运行，不需要联网 API</span>
+  </div>
+  <div id="model-list" class="model-grid">加载中…</div>
+</div>
+
+<!-- 当前配置 -->
+<div class="card">
+  <div class="card-head">
+    <h2>当前配置</h2>
+    <span class="badge-soft" id="cfg-backend-badge">none</span>
+  </div>
+
+  <form id="asr-form" class="form-grid">
+    <div class="field">
+      <label for="asr-backend">运行方式</label>
+      <select id="asr-backend" name="backend">
+        <option value="none">关闭（不转写）</option>
+        <option value="sherpa">本地离线模型</option>
+        <option value="openai">云端 API（OpenAI 兼容）</option>
+        <option value="native">直接交给模型（需支持音频）</option>
       </select>
-    </label>
-    <label>模型目录（sherpa 用）
-      <input type="text" id="asr-form-model-dir" placeholder="/root/.picoclaw-asr/models/sherpa-onnx-paraformer-zh-small-2024-03-09">
-    </label>
-    <label>CLI 路径（sherpa 用）
-      <input type="text" id="asr-form-cli" placeholder="/root/.picoclaw-asr/bin/sherpa-onnx-offline">
-    </label>
-    <label>ffmpeg 路径（可选，留空自动查找）
-      <input type="text" id="asr-form-ffmpeg" placeholder="/usr/bin/ffmpeg">
-    </label>
-    <label>CPU 线程数（0 = 默认 2）
-      <input type="number" id="asr-form-threads" placeholder="2" min="0" max="32">
-    </label>
-    <label>API Key（openai 用）
-      <input type="password" id="asr-form-api-key" placeholder="sk-...">
-    </label>
-    <label>Endpoint（openai 可选）
-      <input type="text" id="asr-form-endpoint" placeholder="https://api.openai.com/v1/audio/transcriptions">
-    </label>
-    <label>语言（可选，如 zh / en）
-      <input type="text" id="asr-form-language" placeholder="zh">
-    </label>
-    <button type="submit">保存配置</button>
+      <p class="field-hint">推荐「本地离线模型」，免费且不需要上传音频</p>
+    </div>
+
+    <!-- 本地模型分组 -->
+    <div class="field-group" data-show-when="sherpa">
+      <div class="group-title">本地模型路径</div>
+
+      <div class="field">
+        <label for="asr-model-dir">模型目录</label>
+        <input type="text" id="asr-model-dir" placeholder="留空使用默认目录（data/models/…）">
+        <p class="field-hint">目录里需要有 model.onnx 或 model.int8.onnx + tokens.txt</p>
+      </div>
+
+      <div class="field">
+        <label for="asr-cli">sherpa CLI 路径</label>
+        <input type="text" id="asr-cli" placeholder="留空自动查找（如 /usr/local/bin/sherpa-onnx-offline）">
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="asr-ffmpeg">FFmpeg 路径</label>
+          <input type="text" id="asr-ffmpeg" placeholder="留空自动查找">
+          <p class="field-hint">用于把 Telegram 的 OGG 语音转成 WAV</p>
+        </div>
+        <div class="field field-narrow">
+          <label for="asr-threads">线程数</label>
+          <input type="number" id="asr-threads" min="0" max="64" placeholder="2">
+          <p class="field-hint">0 = 自动</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 云端 API 分组 -->
+    <div class="field-group" data-show-when="openai">
+      <div class="group-title">云端 API</div>
+
+      <div class="field">
+        <label for="asr-api-key">API Key</label>
+        <input type="password" id="asr-api-key" placeholder="sk-…" autocomplete="off">
+      </div>
+
+      <div class="field">
+        <label for="asr-endpoint">接口地址</label>
+        <input type="text" id="asr-endpoint" placeholder="https://api.openai.com/v1/audio/transcriptions">
+      </div>
+
+      <div class="field">
+        <label for="asr-language">语言</label>
+        <input type="text" id="asr-language" placeholder="zh / en / ja …（留空自动检测）">
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">保存配置</button>
+      <span class="form-msg" id="form-msg"></span>
+    </div>
   </form>
-  <div id="asr-error" class="error" hidden></div>
-  <div id="asr-success" class="success" hidden></div>
 </div>
 {{end}}

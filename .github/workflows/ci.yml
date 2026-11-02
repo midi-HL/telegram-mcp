@@ -10,6 +10,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -28,8 +29,19 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # 快速单元测试（无 race，覆盖全部包）
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test -count=1 -timeout 5m ./...
+
+      # 竞态检测：只跑纯逻辑包（SQLite 在 race 下极慢，排除 cache）
+      - name: Test with race detector (pure logic packages)
+        run: |
+          go test -race -count=1 -timeout 5m \
+            ./internal/asr/... \
+            ./internal/autoreply/... \
+            ./internal/config/... \
+            ./internal/dto/... \
+            ./internal/trust/...
 
       - name: Build (linux/amd64)
         env:

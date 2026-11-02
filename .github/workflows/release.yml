@@ -56,7 +56,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}${{ matrix.arm }}
-          path: dist/*.tar.gz*
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
           retention-days: 7
 
   build-other:
@@ -110,7 +113,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*.zip* dist/*.tar.gz*
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
           retention-days: 7
 
   release:
@@ -134,10 +142,19 @@ jobs:
       - name: Prepare release
         run: |
           mkdir -p release
-          cp artifacts/*.tar.gz artifacts/*.zip release/ 2>/dev/null || true
+          # 用 find 收集所有压缩包（避免 glob 不匹配时静默失败）
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
           cd release
-          sha256sum *.tar.gz *.zip > SHA256SUMS.txt 2>/dev/null || true
+          echo "=== 收集到的文件 ==="
           ls -lh
+          COUNT=$(ls -1 *.tar.gz *.zip 2>/dev/null | wc -l)
+          echo "共 $COUNT 个压缩包"
+          if [ "$COUNT" -lt 19 ]; then
+            echo "::error::期望 19 个产物，实际只有 $COUNT 个"
+            exit 1
+          fi
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

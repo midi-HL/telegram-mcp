@@ -199,3 +199,40 @@ code {
   color: var(--text); border-radius: 6px; padding: 8px 10px;
   font-family: inherit; font-size: 14px; resize: vertical;
 }
+
+/* 登录页 Tab 与二维码 */
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  color: var(--text2); padding: 8px 16px; cursor: pointer; font-size: 14px;
+  border-radius: 0;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.pane { padding-top: 8px; }
+.qr-image { margin: 16px 0; }
+.qr-image img { display: block; border-radius: 8px; background: #fff; padding: 8px; }
+.btn-primary { background: var(--accent); }
+
+/* ASR 模型列表 */
+.model-list { display: flex; flex-direction: column; gap: 8px; }
+.model-item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.model-info { flex: 1; }
+.model-name { font-size: 14px; color: var(--text); font-weight: 500; }
+.model-size {
+  font-size: 11px; color: var(--text2); background: var(--bg);
+  padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+}
+.model-desc { font-size: 12px; color: var(--text2); margin-top: 3px; }
+.progress-bar {
+  height: 8px; background: var(--surface2); border-radius: 4px;
+  overflow: hidden; margin-bottom: 8px;
+}
+.progress-fill {
+  height: 100%; background: var(--accent); width: 0%;
+  transition: width 0.3s ease;
+}

@@ -4,11 +4,12 @@
 <h1>账号管理</h1>
 
 <div class="card">
+  <h2>已登录账号</h2>
   <table class="table">
     <thead>
       <tr><th>账号名</th><th>User ID</th><th>用户名</th><th>昵称</th><th>手机号</th><th>状态</th></tr>
     </thead>
-    <tbody>
+    <tbody id="account-list">
     {{range .Data}}
       <tr>
         <td>{{.Name}}{{if .IsDefault}} <span class="badge">默认</span>{{end}}</td>
@@ -19,15 +20,75 @@
         <td>{{if .Ready}}<span class="ok">✓ 就绪</span>{{else}}<span class="warn">未就绪</span>{{end}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="6" class="empty">暂无账号，请先用命令行运行 <code>tgmcp auth</code></td></tr>
+      <tr><td colspan="6" class="empty">暂无账号，用下方表单登录</td></tr>
     {{end}}
     </tbody>
   </table>
 </div>
 
 <div class="card">
-  <h2>添加账号</h2>
-  <p class="hint">在运行服务的机器上执行：<code>tgmcp auth --account &lt;名字&gt; --qr</code> 或 <code>--phone &lt;号码&gt;</code>，然后重启服务。</p>
+  <h2>第 1 步：Telegram API 凭据</h2>
+  <p class="hint">
+    在 <a href="https://my.telegram.org" target="_blank">my.telegram.org</a> → API development tools 创建应用后获得。
+  </p>
+  <form id="cred-form" class="inline-form">
+    <input type="text" id="cred-account" placeholder="账号名（默认 main）">
+    <input type="number" id="cred-api-id" placeholder="api_id（数字）" required>
+    <input type="text" id="cred-api-hash" placeholder="api_hash（32 位字符串）" required>
+    <button type="submit">保存凭据</button>
+  </form>
+  <div id="cred-status" class="hint" style="margin-top:8px"></div>
+  <div id="cred-error" class="error" hidden></div>
+  <div id="cred-success" class="success" hidden></div>
+</div>
+
+<div class="card">
+  <h2>第 2 步：登录</h2>
+  <div class="tabs">
+    <button class="tab active" data-tab="qr">扫码登录</button>
+    <button class="tab" data-tab="phone">手机号登录</button>
+  </div>
+
+  <!-- 扫码 -->
+  <div id="pane-qr" class="pane">
+    <p class="hint">用 Telegram 手机端「设置 → 设备 → 扫描二维码」扫码。</p>
+    <button id="qr-start" class="btn-primary">生成二维码</button>
+    <div id="qr-box" hidden>
+      <div id="qr-image" class="qr-image"></div>
+      <p class="hint" id="qr-hint">等待扫码…</p>
+      <button id="qr-cancel" class="btn-ghost">取消</button>
+    </div>
+    <div id="qr-error" class="error" hidden></div>
+  </div>
+
+  <!-- 手机号 -->
+  <div id="pane-phone" class="pane" hidden>
+    <form id="phone-form" class="stack-form">
+      <label>手机号（含国际区号）
+        <input type="tel" id="phone-input" placeholder="+8613800138000" required>
+      </label>
+      <button type="submit">发送验证码</button>
+    </form>
+
+    <div id="phone-code-box" hidden>
+      <p class="hint" id="phone-hint"></p>
+      <form id="code-form" class="inline-form">
+        <input type="text" id="code-input" placeholder="输入验证码" required>
+        <button type="submit">提交</button>
+      </form>
+    </div>
+
+    <div id="phone-pwd-box" hidden>
+      <p class="hint">该账号启用了两步验证</p>
+      <form id="pwd-form" class="inline-form">
+        <input type="password" id="pwd-input" placeholder="两步验证密码" required>
+        <button type="submit">提交</button>
+      </form>
+    </div>
+
+    <div id="phone-error" class="error" hidden></div>
+    <div id="phone-success" class="success" hidden></div>
+  </div>
 </div>
 
 <div class="card">

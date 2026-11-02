@@ -440,6 +440,7 @@ func (s *Server) handleASRPage(w http.ResponseWriter, r *http.Request) {
 			"Backend":    s.cfg.ASR.Backend,
 			"ModelDir":   modelDir,
 			"CLIPath":    cliPath,
+			"DataDir":    s.cfg.DataDir,
 			"ModelFound": findModelFileUI(modelDir) != "",
 			"CLIFound":   cliPath != "" && fileExistsUI(cliPath),
 		},
@@ -459,18 +460,22 @@ func (s *Server) handleAPIASR(w http.ResponseWriter, r *http.Request) {
 			"api_key_set": s.cfg.ASR.APIKey != "",
 			"endpoint":    s.cfg.ASR.Endpoint,
 			"language":    s.cfg.ASR.Language,
+			"ffmpeg_path": s.cfg.ASR.FFmpegPath,
+			"num_threads": s.cfg.ASR.NumThreads,
 			"model_found": findModelFileUI(modelDir) != "",
 			"cli_found":   cliPath != "" && fileExistsUI(cliPath),
 		})
 
 	case http.MethodPost:
 		var req struct {
-			Backend  string `json:"backend"`
-			ModelDir string `json:"model_dir"`
-			CLIPath  string `json:"cli_path"`
-			APIKey   string `json:"api_key"`
-			Endpoint string `json:"endpoint"`
-			Language string `json:"language"`
+			Backend    string `json:"backend"`
+			ModelDir   string `json:"model_dir"`
+			CLIPath    string `json:"cli_path"`
+			FFmpegPath string `json:"ffmpeg_path"`
+			NumThreads int    `json:"num_threads"`
+			APIKey     string `json:"api_key"`
+			Endpoint   string `json:"endpoint"`
+			Language   string `json:"language"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
@@ -521,6 +526,12 @@ func (s *Server) handleAPIASR(w http.ResponseWriter, r *http.Request) {
 		if req.Language != "" {
 			s.cfg.ASR.Language = req.Language
 		}
+		if req.FFmpegPath != "" {
+			s.cfg.ASR.FFmpegPath = req.FFmpegPath
+		}
+		if req.NumThreads > 0 {
+			s.cfg.ASR.NumThreads = req.NumThreads
+		}
 
 		if err := s.cfg.Save(); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -555,4 +566,58 @@ func findModelFileUI(dir string) string {
 func fileExistsUI(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+
+// handleAPIASRModels 列出可选模型。
+func (s *Server) handleAPIASRModels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"models": availableModels})
+}
+
+// handleAPIASRInstall 启动模型下载。
+func (s *Server) handleAPIASRInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "方法不允许"})
+		return
+	}
+	var req struct {
+		ModelID string `json:"model_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
+		return
+	}
+	if s.asrInstaller == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "安装器未初始化"})
+		return
+	}
+	if err := s.asrInstaller.Start(r.Context(), req.ModelID, s.cfg.DataDir, s.logger); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": s.asrInstaller.State()})
+}
+
+// handleAPIASRInstallStatus 查询下载进度。
+func (s *Server) handleAPIASRInstallStatus(w http.ResponseWriter, r *http.Request) {
+	if s.asrInstaller == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "安装器未初始化"})
+		return
+	}
+	st := s.asrInstaller.State()
+	// 下载完成后自动更新配置
+	if st.Phase == "done" && st.TargetDir != "" {
+		s.cfg.ASR.Backend = "sherpa"
+		s.cfg.ASR.ModelDir = st.TargetDir
+		_ = s.cfg.Save()
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// handleAPIASREnvironment 环境检测。
+func (s *Server) handleAPIASREnvironment(w http.ResponseWriter, r *http.Request) {
+	modelDir := s.cfg.ASR.ResolveModelDir(s.cfg.DataDir)
+	cliPath := s.cfg.ASR.ResolveCLIPath()
+	env := CheckEnvironment(modelDir, cliPath)
+	writeJSON(w, http.StatusOK, env)
 }

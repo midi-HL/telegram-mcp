@@ -13,23 +13,6 @@
     });
   }
 
-  // 缓存统计
-  const cacheStats = document.getElementById('cache-stats');
-  if (cacheStats) {
-    fetch('/api/status')
-      .then(r => r.json())
-      .then(d => {
-        if (d.cache) {
-          cacheStats.textContent =
-            `聊天 ${d.cache.chats} · 消息 ${d.cache.messages} · 用户 ${d.cache.users} · ` +
-            `数据库 ${(d.cache.db_size_mb || 0).toFixed(2)} MB`;
-        } else {
-          cacheStats.textContent = '无数据';
-        }
-      })
-      .catch(e => { cacheStats.textContent = '加载失败：' + e.message; });
-  }
-
   // 添加管理员
   const addAdminForm = document.getElementById('add-admin-form');
   if (addAdminForm) {
@@ -322,65 +305,5 @@
         if (res.ok) window.location.reload();
       } catch (e) { alert('网络错误：' + e.message); }
     });
-  });
-})();
-
-// ===== ASR 配置 =====
-(function () {
-  const form = document.getElementById('asr-form');
-  if (!form) return;
-
-  const backendSel = document.getElementById('asr-form-backend');
-
-  // 载入当前配置
-  fetch('/api/asr')
-    .then(r => r.json())
-    .then(d => {
-      if (d.error) return;
-      backendSel.value = d.backend || 'none';
-      document.getElementById('asr-form-model-dir').value = d.model_dir || '';
-      document.getElementById('asr-form-cli').value = d.cli_path || '';
-      document.getElementById('asr-form-endpoint').value = d.endpoint || '';
-      document.getElementById('asr-form-language').value = d.language || '';
-      if (d.api_key_set) {
-        document.getElementById('asr-form-api-key').placeholder = '已设置（留空不修改）';
-      }
-    })
-    .catch(() => {});
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errBox = document.getElementById('asr-error');
-    const okBox = document.getElementById('asr-success');
-    errBox.hidden = true; okBox.hidden = true;
-
-    const payload = {
-      backend: backendSel.value,
-      model_dir: document.getElementById('asr-form-model-dir').value.trim(),
-      cli_path: document.getElementById('asr-form-cli').value.trim(),
-      api_key: document.getElementById('asr-form-api-key').value.trim(),
-      endpoint: document.getElementById('asr-form-endpoint').value.trim(),
-      language: document.getElementById('asr-form-language').value.trim()
-    };
-
-    try {
-      const res = await fetch('/api/asr', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const d = await res.json();
-      if (res.ok) {
-        okBox.textContent = '配置已保存';
-        okBox.hidden = false;
-        setTimeout(() => window.location.reload(), 800);
-      } else {
-        errBox.textContent = d.error || '保存失败';
-        errBox.hidden = false;
-      }
-    } catch (err) {
-      errBox.textContent = '网络错误：' + err.message;
-      errBox.hidden = false;
-    }
   });
 })();

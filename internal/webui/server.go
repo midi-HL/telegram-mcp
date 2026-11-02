@@ -34,6 +34,8 @@ type Server struct {
 	pool      *tgclient.Pool
 	logger    *zap.Logger
 	autoreply *autoreply.Engine
+	loginMgr    *LoginManager
+	asrInstaller *ASRInstaller
 
 	tmpl *template.Template
 	mux  *http.ServeMux
@@ -62,6 +64,8 @@ func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Poo
 		pool:      pool,
 		logger:    logger,
 		autoreply: ar,
+		loginMgr:     NewLoginManager(cfg, pool, logger),
+		asrInstaller: NewASRInstaller(),
 		tmpl:      tmpl,
 		mux:       http.NewServeMux(),
 	}
@@ -114,6 +118,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/autoreply", s.withAuth(s.handleAPIAutoReply))
 	s.mux.HandleFunc("/api/autoreply/toggle", s.withAuth(s.handleAPIAutoReplyToggle))
 	s.mux.HandleFunc("/api/asr", s.withAuth(s.handleAPIASR))
+	// 登录相关
+	s.mux.HandleFunc("/api/credentials", s.withAuth(s.handleAPICredentials))
+	s.mux.HandleFunc("/api/login/qr", s.withAuth(s.handleAPILoginQR))
+	s.mux.HandleFunc("/api/login/phone", s.withAuth(s.handleAPILoginPhone))
+	s.mux.HandleFunc("/api/login/bot", s.withAuth(s.handleAPILoginBot))
+	s.mux.HandleFunc("/api/login/status", s.withAuth(s.handleAPILoginStatus))
+	s.mux.HandleFunc("/api/login/code", s.withAuth(s.handleAPILoginCode))
+	s.mux.HandleFunc("/api/login/password", s.withAuth(s.handleAPILoginPassword))
+	s.mux.HandleFunc("/api/login/cancel", s.withAuth(s.handleAPILoginCancel))
+	s.mux.HandleFunc("/api/asr/models", s.withAuth(s.handleAPIASRModels))
+	s.mux.HandleFunc("/api/asr/install", s.withAuth(s.handleAPIASRInstall))
+	s.mux.HandleFunc("/api/asr/install/status", s.withAuth(s.handleAPIASRInstallStatus))
+	s.mux.HandleFunc("/api/asr/environment", s.withAuth(s.handleAPIASREnvironment))
 
 	// 根路径重定向
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

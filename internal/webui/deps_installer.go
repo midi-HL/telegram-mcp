@@ -327,7 +327,8 @@ func (d *DepInstaller) installSherpa(dataDir string, logger *zap.Logger) {
 		return
 	}
 
-	binDir := filepath.Join(dataDir, "bin")
+	// 解压到 data/sherpa/（压缩包内已有 bin/ lib/ include/ 结构）
+	binDir := filepath.Join(dataDir, "sherpa")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		d.setState(func(s *DepInstallState) {
 			s.Phase = "error"
@@ -408,21 +409,32 @@ func (d *DepInstaller) installSherpa(dataDir string, logger *zap.Logger) {
 }
 
 // sherpaDownloadURL 按平台返回下载地址。
+//
+// 资产名经 GitHub API 核实（v2.0.1 共 288 个资产），全部为 tar.bz2：
+//   - linux-x64-shared.tar.bz2            (Linux x86_64, glibc)
+//   - linux-aarch64-shared-cpu.tar.bz2    (Linux ARM64, glibc)
+//   - linux-arm-gnueabihf-shared.tar.bz2  (Linux ARMv7, glibc)
+//   - osx-arm64-shared.tar.bz2            (macOS Apple Silicon)
+//   - osx-x64-shared.tar.bz2              (macOS Intel)
+//   - win-x64-shared-MD-Release.tar.bz2   (Windows x64, MD 运行时)
+//
+// 注意：Windows 没有 .zip 资产，只有 tar.bz2。
 func sherpaDownloadURL() (url, name string) {
 	const base = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/"
 	switch runtime.GOOS + "/" + runtime.GOARCH {
 	case "linux/amd64":
-		return base + "sherpa-onnx-v2.0.1-linux-x64-shared-cpu.tar.bz2", "sherpa.tar.bz2"
+		return base + "sherpa-onnx-v2.0.1-linux-x64-shared.tar.bz2", "sherpa.tar.bz2"
 	case "linux/arm64":
 		return base + "sherpa-onnx-v2.0.1-linux-aarch64-shared-cpu.tar.bz2", "sherpa.tar.bz2"
 	case "linux/arm":
-		return base + "sherpa-onnx-v2.0.1-linux-arm-shared-cpu.tar.bz2", "sherpa.tar.bz2"
+		return base + "sherpa-onnx-v2.0.1-linux-arm-gnueabihf-shared.tar.bz2", "sherpa.tar.bz2"
 	case "darwin/arm64":
 		return base + "sherpa-onnx-v2.0.1-osx-arm64-shared.tar.bz2", "sherpa.tar.bz2"
 	case "darwin/amd64":
-		return base + "sherpa-onnx-v2.0.1-osx-x86_64-shared.tar.bz2", "sherpa.tar.bz2"
+		return base + "sherpa-onnx-v2.0.1-osx-x64-shared.tar.bz2", "sherpa.tar.bz2"
 	case "windows/amd64":
-		return base + "sherpa-onnx-v2.0.1-win-x64-shared.zip", "sherpa.zip"
+		// Windows 只有 tar.bz2；MD 运行时（与 MSVC 动态运行时匹配）
+		return base + "sherpa-onnx-v2.0.1-win-x64-shared-MD-Release.tar.bz2", "sherpa.tar.bz2"
 	default:
 		return "", ""
 	}

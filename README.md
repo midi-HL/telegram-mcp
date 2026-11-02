@@ -247,4 +247,18 @@ go build -o bin/tgmcp ./cmd/tgmcp
 
 ## 许可证
 
-MIT
+**PolyForm Noncommercial 1.0.0** + 附加条款：
+
+- ✅ 个人使用（任何目的，包括用自己账号做商业用途）
+- ✅ 非营利组织内部使用
+- ✅ Fork 和修改自用
+- ✅ 免费分享未修改的副本
+- ✅ 纳入免费的非营利开源项目
+- ❌ **销售、出租或收费**（软件本身或作为服务）
+- ❌ **删除署名**（必须保留作者名 + 原仓库 URL）
+
+完整条款见 [LICENSE](LICENSE)。商业授权请联系作者。
+
+---
+
+*Copyright 2026 Edwin (辰星) — https://github.com/midi-HL/telegram-mcp*

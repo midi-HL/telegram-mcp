@@ -99,6 +99,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/ui/settings", s.withAuth(s.handleSettings))
 	s.mux.HandleFunc("/ui/chat", s.withAuth(s.handleChat))
 	s.mux.HandleFunc("/ui/autoreply", s.withAuth(s.handleAutoReply))
+	s.mux.HandleFunc("/ui/asr", s.withAuth(s.handleASRPage))
 
 	// API
 	s.mux.HandleFunc("/api/login", s.handleAPILogin)
@@ -112,6 +113,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/send", s.withAuth(s.handleAPISend))
 	s.mux.HandleFunc("/api/autoreply", s.withAuth(s.handleAPIAutoReply))
 	s.mux.HandleFunc("/api/autoreply/toggle", s.withAuth(s.handleAPIAutoReplyToggle))
+	s.mux.HandleFunc("/api/asr", s.withAuth(s.handleAPIASR))
 
 	// 根路径重定向
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

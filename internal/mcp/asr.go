@@ -56,7 +56,10 @@ func handleASR(ctx context.Context, deps *Deps, in ASRInput) (*mcp.CallToolResul
 	case "backend":
 		out.Action = "backend"
 		out.Backend = deps.Config.ASR.Backend
-		out.Note = fmt.Sprintf("当前后端: %s", deps.Config.ASR.Backend)
+		modelDir := deps.Config.ASR.ResolveModelDir(deps.Config.DataDir)
+		cliPath := deps.Config.ASR.ResolveCLIPath()
+		out.Note = fmt.Sprintf("后端: %s | 模型目录: %s | CLI: %s",
+			deps.Config.ASR.Backend, modelDir, cliPath)
 		return nil, out, nil
 	default:
 		out.Note = fmt.Sprintf("未知 action %q", in.Action)
@@ -119,12 +122,16 @@ func handleTranscribe(ctx context.Context, deps *Deps, in ASRInput, out ASROutpu
 	if backendName == "" {
 		backendName = deps.Config.ASR.Backend
 	}
+	// 路径按优先级解析（环境变量 > 配置 > 默认）
 	tr, err := asr.New(asr.Config{
 		Backend:  backendName,
-		CLIPath:  deps.Config.ASR.CLIPath,
-		ModelDir: deps.Config.ASR.ModelDir,
+		CLIPath:  deps.Config.ASR.ResolveCLIPath(),
+		ModelDir: deps.Config.ASR.ResolveModelDir(deps.Config.DataDir),
 		APIKey:   deps.Config.ASR.APIKey,
-		Endpoint: deps.Config.ASR.Endpoint,
+		Endpoint:   deps.Config.ASR.Endpoint,
+		Language:   deps.Config.ASR.Language,
+		FFmpegPath: deps.Config.ASR.FFmpegPath,
+		NumThreads: deps.Config.ASR.NumThreads,
 	})
 	if err != nil {
 		out.Note = err.Error()

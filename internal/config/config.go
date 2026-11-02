@@ -30,12 +30,41 @@ type WebUI struct {
 }
 
 // ASR 是语音转写的配置。
+//
+// 路径解析优先级（从高到低）：
+//  1. 环境变量 TGMCP_ASR_MODEL_DIR / TGMCP_ASR_CLI
+//  2. config.json 里的 model_dir / cli_path
+//  3. 默认 {DataDir}/models/sherpa-onnx-paraformer-zh-small
 type ASR struct {
-	Backend   string `json:"backend"`
-	ModelDir  string `json:"model_dir,omitempty"`
-	CLIPath   string `json:"cli_path,omitempty"`
-	APIKey    string `json:"api_key,omitempty"`
-	Endpoint  string `json:"endpoint,omitempty"`
+	Backend  string `json:"backend"`
+	ModelDir string `json:"model_dir,omitempty"`
+	CLIPath  string `json:"cli_path,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Language string `json:"language,omitempty"`
+	// FFmpegPath 是 ffmpeg 路径（空则自动查找），用于把 Ogg/Opus 转成 WAV
+	FFmpegPath string `json:"ffmpeg_path,omitempty"`
+	// NumThreads 是 sherpa 的 CPU 线程数（0 则默认 2）
+	NumThreads int `json:"num_threads,omitempty"`
+}
+
+// ResolveModelDir 按优先级解析模型目录。
+func (a *ASR) ResolveModelDir(dataDir string) string {
+	if v := os.Getenv("TGMCP_ASR_MODEL_DIR"); v != "" {
+		return v
+	}
+	if a.ModelDir != "" {
+		return a.ModelDir
+	}
+	return filepath.Join(dataDir, "models", "sherpa-onnx-paraformer-zh-small")
+}
+
+// ResolveCLIPath 按优先级解析 CLI 路径。
+func (a *ASR) ResolveCLIPath() string {
+	if v := os.Getenv("TGMCP_ASR_CLI"); v != "" {
+		return v
+	}
+	return a.CLIPath
 }
 
 // Config 是完整配置。

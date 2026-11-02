@@ -109,22 +109,80 @@ func TestNativeTranscribe(t *testing.T) {
 	}
 }
 
-func TestParseSherpaOutput(t *testing.T) {
+func TestParseSherpaJSON(t *testing.T) {
 	tests := []struct {
-		input string
-		want  string
+		name    string
+		input   string
+		want    string
+		wantErr bool
 	}{
-		{"0: 你好世界", "你好世界"},
-		{"1: 第二句话", "第二句话"},
-		{"--some-flag\n0: 文本", "文本"},
-		{"纯文本没有前缀", "纯文本没有前缀"},
-		{"", ""},
+		{
+			name:  "单行 JSON",
+			input: `{"lang":"","text":"你好世界","tokens":[]}`,
+			want:  "你好世界",
+		},
+		{
+			name:  "多行 JSON",
+			input: "{\"text\":\"第一句\"}\n{\"text\":\"第二句\"}",
+			want:  "第一句 第二句",
+		},
+		{
+			name:  "含日志噪音",
+			input: "-- loading model\n{\"text\":\"识别结果\"}\n-- done",
+			want:  "识别结果",
+		},
+		{
+			name:    "空输出",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "无 text 字段",
+			input:   `{"lang":"zh"}`,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
-		got := parseSherpaOutput(tt.input)
-		if got != tt.want {
-			t.Errorf("parseSherpaOutput(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSherpaJSON(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("期望报错，但返回 %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("不应报错: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsWAV(t *testing.T) {
+	wavHeader := []byte("RIFF\x24\x00\x00\x00WAVEfmt ")
+	if !isWAV(wavHeader) {
+		t.Error("应识别为 WAV")
+	}
+	oggHeader := []byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00")
+	if isWAV(oggHeader) {
+		t.Error("OggS 不应识别为 WAV")
+	}
+	if isWAV([]byte("short")) {
+		t.Error("过短不应识别")
+	}
+	if isWAV(nil) {
+		t.Error("nil 不应识别")
+	}
+}
+
+func TestResolveModelFilesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s := &Sherpa{ModelDir: dir}
+	if _, _, err := s.resolveModelFiles(); err == nil {
+		t.Error("空目录应报错")
 	}
 }
 

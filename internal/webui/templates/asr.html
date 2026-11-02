@@ -1,0 +1,70 @@
+{{define "asr.html"}}{{template "layout" .}}{{end}}
+
+{{define "content-asr"}}
+<h1>语音转写（ASR）</h1>
+
+<div class="card">
+  <h2>当前配置</h2>
+  <table class="table">
+    <tr><th>后端</th><td><code id="asr-backend">{{.Data.Backend}}</code></td></tr>
+    <tr><th>模型目录</th><td><code id="asr-model-dir">{{.Data.ModelDir}}</code></td></tr>
+    <tr><th>CLI 路径</th><td><code id="asr-cli">{{.Data.CLIPath}}</code></td></tr>
+    <tr><th>模型状态</th><td id="asr-model-status">{{if .Data.ModelFound}}<span class="ok">✅ 已找到</span>{{else}}<span class="warn">❌ 未找到</span>{{end}}</td></tr>
+    <tr><th>CLI 状态</th><td id="asr-cli-status">{{if .Data.CLIFound}}<span class="ok">✅ 已找到</span>{{else}}<span class="warn">❌ 未找到</span>{{end}}</td></tr>
+  </table>
+  <p class="hint">
+    路径优先级：环境变量 <code>TGMCP_ASR_MODEL_DIR</code> / <code>TGMCP_ASR_CLI</code>
+    &gt; 此处配置 &gt; 默认目录
+  </p>
+</div>
+
+<div class="card">
+  <h2>修改配置</h2>
+  <form id="asr-form" class="stack-form">
+    <label>后端
+      <select id="asr-form-backend">
+        <option value="none">none（不转写）</option>
+        <option value="sherpa">sherpa（离线，需模型+CLI）</option>
+        <option value="openai">openai（Whisper API）</option>
+        <option value="native">native（直接给模型音频）</option>
+      </select>
+    </label>
+    <label>模型目录（sherpa 用）
+      <input type="text" id="asr-form-model-dir" placeholder="/opt/sherpa/models/paraformer-zh-small">
+    </label>
+    <label>CLI 路径（sherpa 用）
+      <input type="text" id="asr-form-cli" placeholder="/usr/local/bin/sherpa-onnx-offline">
+    </label>
+    <label>API Key（openai 用）
+      <input type="password" id="asr-form-api-key" placeholder="sk-...">
+    </label>
+    <label>Endpoint（openai 可选）
+      <input type="text" id="asr-form-endpoint" placeholder="https://api.openai.com/v1/audio/transcriptions">
+    </label>
+    <label>语言（可选，如 zh / en）
+      <input type="text" id="asr-form-language" placeholder="zh">
+    </label>
+    <button type="submit">保存配置</button>
+  </form>
+  <div id="asr-error" class="error" hidden></div>
+  <div id="asr-success" class="success" hidden></div>
+</div>
+
+<div class="card">
+  <h2>安装帮助</h2>
+  <p class="hint">如果你已经有 sherpa-onnx 部署，直接把路径填到上面即可，<strong>不需要重新下载</strong>。</p>
+  <h3 style="font-size:13px;color:var(--text2);margin:16px 0 8px">如果没有，下载步骤：</h3>
+  <ol class="hint" style="padding-left:20px;line-height:1.9">
+    <li>模型（74MB）：<br>
+      <code>https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2</code></li>
+    <li>CLI 可执行文件（按平台）：
+      <ul style="padding-left:20px">
+        <li>Windows: <code>sherpa-onnx-non-streaming-asr-x64-v2.0.1.exe</code></li>
+        <li>Linux: <code>sherpa-onnx-v2.0.1-linux-x64-shared.tar.bz2</code></li>
+        <li>Termux: <code>sherpa-onnx-v2.0.1-android-aarch64-termux-shared.tar.bz2</code></li>
+      </ul>
+    </li>
+    <li>或运行 <code>tgmcp asr setup</code> 自动下载模型</li>
+  </ol>
+</div>
+{{end}}

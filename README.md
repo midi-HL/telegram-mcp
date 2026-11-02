@@ -169,6 +169,23 @@ chmod +x tgmcp-linux-arm64
 
 **注意**：安卓上跑 Telegram 客户端会触发风控，建议用小号。
 
+## 平台支持
+
+| OS | 架构 | 状态 |
+|---|---|---|
+| Linux | x86_64, i386, armv6, armv7, arm64, loong64, riscv64, mipsle, mips64, mips64le, s390x | ✅ 完整支持 |
+| Windows | x86_64, i386, arm64 | ✅ 完整支持 |
+| macOS | x86_64, arm64 | ✅ 完整支持 |
+| FreeBSD | x86_64, i386, arm64 | ✅ 完整支持 |
+| NetBSD | x86_64, arm64 | ✅ 完整支持 |
+| OpenBSD | x86_64 | ✅ 完整支持 |
+| **linux/mips**（大端 32 位） | — | ❌ **不支持**：`modernc.org/libc` 无该架构实现 |
+| **linux/ppc64**（大端 64 位） | — | ⚠️ **待验证**：同样依赖 `modernc.org/libc` 的大端支持 |
+
+> 依赖 `modernc.org/sqlite`（纯 Go SQLite），它通过 `modernc.org/libc` 实现 C 库。
+> 该项目**只实现了小端架构**，因此所有大端平台（mips、ppc64）都无法编译。
+> 这是依赖的硬限制，不是本项目的问题。
+
 ## 语音转写（可选）
 
 ```bash

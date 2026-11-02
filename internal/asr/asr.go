@@ -11,7 +11,6 @@ package asr
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -39,8 +38,10 @@ type Transcriber interface {
 type Config struct {
 	Backend  string
 	// sherpa 相关
-	CLIPath  string
-	ModelDir string
+	CLIPath    string
+	ModelDir   string
+	FFmpegPath string
+	NumThreads int
 	// 云服务相关
 	APIKey   string
 	Endpoint string
@@ -59,7 +60,12 @@ func New(cfg Config) (Transcriber, error) {
 		if cfg.ModelDir == "" {
 			return nil, fmt.Errorf("sherpa 后端需要 model_dir")
 		}
-		return &Sherpa{CLIPath: cfg.CLIPath, ModelDir: cfg.ModelDir}, nil
+		return &Sherpa{
+			CLIPath:    cfg.CLIPath,
+			ModelDir:   cfg.ModelDir,
+			FFmpegPath: cfg.FFmpegPath,
+			NumThreads: cfg.NumThreads,
+		}, nil
 	case "openai":
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("openai 后端需要 api_key")
@@ -105,66 +111,6 @@ func (n *Native) Transcribe(ctx context.Context, audio []byte, mime string) (*Re
 	}, nil
 }
 
-// Sherpa 通过子进程调用 sherpa-onnx。
-type Sherpa struct {
-	CLIPath  string
-	ModelDir string
-}
-
-// Name 返回后端名。
-func (s *Sherpa) Name() string { return "sherpa" }
-
-// Transcribe 调用 sherpa-onnx-offline 命令行。
-//
-// 用法：
-//
-//	sherpa-onnx-offline --tokens=... --paraformer=... --model-type=paraformer input.wav
-func (s *Sherpa) Transcribe(ctx context.Context, audio []byte, mime string) (*Result, error) {
-	// 写入临时 wav 文件
-	tmp, err := writeTempAudio(audio)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanupTemp(tmp)
-
-	args := []string{
-		"--tokens=" + s.ModelDir + "/tokens.txt",
-		"--paraformer=" + s.ModelDir + "/model.onnx",
-		"--model-type=paraformer",
-		tmp,
-	}
-
-	cmd := exec.CommandContext(ctx, s.CLIPath, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("sherpa 执行失败: %w (输出: %s)", err, truncate(string(out), 300))
-	}
-
-	text := parseSherpaOutput(string(out))
-	return &Result{
-		Backend: "sherpa",
-		Text:    text,
-	}, nil
-}
-
-// parseSherpaOutput 从 sherpa 输出里提取识别文本。
-func parseSherpaOutput(out string) string {
-	var lines []string
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "--") || strings.HasPrefix(line, "sherpa") {
-			continue
-		}
-		// 去掉 "0:" 之类的时间戳前缀
-		if i := strings.Index(line, ":"); i > 0 && i < 6 {
-			line = strings.TrimSpace(line[i+1:])
-		}
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return strings.Join(lines, " ")
-}
 
 func truncate(s string, n int) string {
 	r := []rune(s)

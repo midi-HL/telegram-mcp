@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gotd/td/tg"
@@ -419,3 +421,138 @@ func parseInt(s string, def int) int {
 }
 
 var _ = context.Background
+
+// handleASRPage ASR 配置页。
+func (s *Server) handleASRPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	modelDir := s.cfg.ASR.ResolveModelDir(s.cfg.DataDir)
+	cliPath := s.cfg.ASR.ResolveCLIPath()
+
+	s.render(w, "asr.html", pageData{
+		Title:        "语音转写",
+		Active:       "asr",
+		IsDefaultPwd: s.store.IsDefaultPassword(ctx),
+		Data: map[string]any{
+			"Backend":    s.cfg.ASR.Backend,
+			"ModelDir":   modelDir,
+			"CLIPath":    cliPath,
+			"ModelFound": findModelFileUI(modelDir) != "",
+			"CLIFound":   cliPath != "" && fileExistsUI(cliPath),
+		},
+	})
+}
+
+// handleAPIASR ASR 配置 API。
+func (s *Server) handleAPIASR(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		modelDir := s.cfg.ASR.ResolveModelDir(s.cfg.DataDir)
+		cliPath := s.cfg.ASR.ResolveCLIPath()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"backend":     s.cfg.ASR.Backend,
+			"model_dir":   modelDir,
+			"cli_path":    cliPath,
+			"api_key_set": s.cfg.ASR.APIKey != "",
+			"endpoint":    s.cfg.ASR.Endpoint,
+			"language":    s.cfg.ASR.Language,
+			"model_found": findModelFileUI(modelDir) != "",
+			"cli_found":   cliPath != "" && fileExistsUI(cliPath),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Backend  string `json:"backend"`
+			ModelDir string `json:"model_dir"`
+			CLIPath  string `json:"cli_path"`
+			APIKey   string `json:"api_key"`
+			Endpoint string `json:"endpoint"`
+			Language string `json:"language"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
+			return
+		}
+
+		// 校验后端
+		switch req.Backend {
+		case "none", "sherpa", "openai", "native":
+		case "":
+			req.Backend = s.cfg.ASR.Backend
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": "未知后端，支持 none/sherpa/openai/native",
+			})
+			return
+		}
+
+		// sherpa 校验路径
+		if req.Backend == "sherpa" {
+			if req.ModelDir != "" && findModelFileUI(req.ModelDir) == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]any{
+					"error": "模型目录里找不到模型文件（model.onnx / encoder.onnx 等）",
+				})
+				return
+			}
+			if req.CLIPath != "" && !fileExistsUI(req.CLIPath) {
+				writeJSON(w, http.StatusBadRequest, map[string]any{
+					"error": "CLI 路径不存在：" + req.CLIPath,
+				})
+				return
+			}
+		}
+
+		s.cfg.ASR.Backend = req.Backend
+		if req.ModelDir != "" {
+			s.cfg.ASR.ModelDir = req.ModelDir
+		}
+		if req.CLIPath != "" {
+			s.cfg.ASR.CLIPath = req.CLIPath
+		}
+		if req.APIKey != "" {
+			s.cfg.ASR.APIKey = req.APIKey
+		}
+		if req.Endpoint != "" {
+			s.cfg.ASR.Endpoint = req.Endpoint
+		}
+		if req.Language != "" {
+			s.cfg.ASR.Language = req.Language
+		}
+
+		if err := s.cfg.Save(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		s.logger.Info("ASR 配置已更新",
+			zap.String("backend", req.Backend),
+			zap.String("model_dir", req.ModelDir),
+			zap.String("cli", req.CLIPath))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "方法不允许"})
+	}
+}
+
+// findModelFileUI 查找模型文件。
+func findModelFileUI(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	for _, name := range []string{"model.onnx", "model.int8.onnx", "encoder.onnx", "encoder.int8.onnx", "paraformer.onnx"} {
+		p := filepath.Join(dir, name)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// fileExistsUI 检查文件存在。
+func fileExistsUI(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}

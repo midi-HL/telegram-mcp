@@ -1,0 +1,227 @@
+# GoReleaser 配置 — 产物矩阵经本地实测验证（20 个架构）
+# 文档：https://goreleaser.com
+#
+# 排除的 6 个架构（modernc.org/libc 无实现）：
+#   linux/mips, linux/mipsle, linux/mips64, linux/mips64le, linux/ppc64, netbsd/arm64
+version: 2
+project_name: tgmcp
+before:
+  hooks:
+  - go mod tidy
+  - go test ./...
+builds:
+- id: tgmcp
+  main: ./cmd/tgmcp
+  binary: tgmcp
+  env:
+  - CGO_ENABLED=0
+  flags:
+  - -trimpath
+  ldflags:
+  - -s
+  - -w
+  - -X main.version={{.Version}}
+  - -X main.commit={{.Commit}}
+  - -X main.date={{.Date}}
+  goos:
+  - linux
+  - windows
+  - darwin
+  - freebsd
+  - netbsd
+  - openbsd
+  goarch:
+  - '386'
+  - amd64
+  - arm
+  - arm64
+  - loong64
+  - ppc64le
+  - riscv64
+  - s390x
+  goarm:
+  - '6'
+  - '7'
+  ignore:
+  - goos: windows
+    goarch: arm
+  - goos: windows
+    goarch: loong64
+  - goos: windows
+    goarch: ppc64le
+  - goos: windows
+    goarch: riscv64
+  - goos: windows
+    goarch: s390x
+  - goos: darwin
+    goarch: '386'
+  - goos: darwin
+    goarch: arm
+  - goos: darwin
+    goarch: loong64
+  - goos: darwin
+    goarch: ppc64le
+  - goos: darwin
+    goarch: riscv64
+  - goos: darwin
+    goarch: s390x
+  - goos: freebsd
+    goarch: arm
+  - goos: freebsd
+    goarch: loong64
+  - goos: freebsd
+    goarch: ppc64le
+  - goos: freebsd
+    goarch: riscv64
+  - goos: freebsd
+    goarch: s390x
+  - goos: netbsd
+    goarch: '386'
+  - goos: netbsd
+    goarch: arm
+  - goos: netbsd
+    goarch: arm64
+  - goos: netbsd
+    goarch: loong64
+  - goos: netbsd
+    goarch: ppc64le
+  - goos: netbsd
+    goarch: riscv64
+  - goos: netbsd
+    goarch: s390x
+  - goos: openbsd
+    goarch: '386'
+  - goos: openbsd
+    goarch: arm
+  - goos: openbsd
+    goarch: arm64
+  - goos: openbsd
+    goarch: loong64
+  - goos: openbsd
+    goarch: ppc64le
+  - goos: openbsd
+    goarch: riscv64
+  - goos: openbsd
+    goarch: s390x
+archives:
+- id: default
+  formats:
+  - tar.gz
+  format_overrides:
+  - goos: windows
+    formats:
+    - zip
+  name_template: '{{ .ProjectName }}-{{ .Version }}-{{ if eq .Os "darwin" }}darwin{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{
+    .Arm }}{{ else }}{{ .Arch }}{{ end }}'
+  files:
+  - LICENSE
+  - README.md
+  - README_EN.md
+  - README_JA.md
+  - README_RU.md
+  - skills/telegram-mcp/**
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
+  algorithm: sha256
+nfpms:
+- id: deb
+  package_name: tgmcp
+  vendor: Edwin (辰星)
+  homepage: https://github.com/midi-HL/telegram-mcp
+  maintainer: Edwin (辰星) <https://github.com/midi-HL>
+  description: Telegram MCP server - full MTProto client access for AI agents.
+  license: PolyForm-Noncommercial-1.0.0
+  formats:
+  - deb
+  - rpm
+  bindir: /usr/local/bin
+  contents:
+  - src: ./LICENSE
+    dst: /usr/share/doc/tgmcp/LICENSE
+  - src: ./README.md
+    dst: /usr/share/doc/tgmcp/README.md
+  - src: ./skills/telegram-mcp
+    dst: /usr/share/tgmcp/skills
+    type: tree
+  goos:
+  - linux
+  goarch:
+  - '386'
+  - amd64
+  - arm
+  - arm64
+  - loong64
+  - ppc64le
+  - riscv64
+  - s390x
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
+    - '^ci:'
+    - '^chore:'
+  groups:
+  - title: Features
+    regexp: ^feat
+    order: 0
+  - title: Bug Fixes
+    regexp: ^fix
+    order: 1
+  - title: Performance
+    regexp: ^perf
+    order: 2
+  - title: Others
+    order: 999
+release:
+  github:
+    owner: midi-HL
+    name: telegram-mcp
+  draft: false
+  prerelease: auto
+  name_template: '{{ .Tag }}'
+  header: '## Telegram MCP {{ .Tag }}
+
+
+    通过 MCP 让 AI 操作真实的 Telegram 账号。
+
+
+    **支持平台（20 个架构，均经实测验证）**
+
+
+    | OS | 架构 | 格式 |
+
+    |---|---|---|
+
+    | Linux | x86_64, i386, armv6, armv7, arm64, loong64, ppc64le, riscv64, s390x | tar.gz / deb / rpm |
+
+    | Windows | x86_64, i386, arm64 | zip |
+
+    | macOS | x86_64, arm64 | tar.gz |
+
+    | FreeBSD | x86_64, i386, arm64 | tar.gz |
+
+    | NetBSD | x86_64 | tar.gz |
+
+    | OpenBSD | x86_64 | tar.gz |
+
+
+    **不支持的架构**（依赖 `modernc.org/libc` 无实现）：
+
+    `linux/mips`、`linux/mipsle`、`linux/mips64`、`linux/mips64le`、`linux/ppc64`、`netbsd/arm64`
+
+
+    **快速开始**：解压后运行 `tgmcp auth --qr` 登录，然后配置 MCP 客户端。
+
+    '
+  footer: '---
+
+
+    **许可证**：PolyForm Noncommercial 1.0.0 + 署名条款 + 禁止付费分发
+
+
+    *Copyright 2026 Edwin (辰星) — https://github.com/midi-HL/telegram-mcp*'

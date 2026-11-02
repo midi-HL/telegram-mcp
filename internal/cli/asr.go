@@ -119,7 +119,10 @@ func (a *App) asrSetup(ctx context.Context, cfg *config.Config, cliPath string) 
 		fmt.Fprintf(a.Stdout, "✅ 模型已安装：%s\n", modelDir)
 	}
 
-	// 检查 CLI
+	// 检查 CLI（自定义路径 > 配置 > PATH 查找）
+	if cliPath == "" {
+		cliPath = cfg.ASR.ResolveCLIPath()
+	}
 	if cliPath == "" {
 		cliPath = findSherpaCLI()
 	}
@@ -232,3 +235,21 @@ func findSherpaCLI() string {
 
 // 确保 asr 包被引用
 var _ = asr.ModelDirName
+
+// findModelFile 在模型目录里查找模型文件（支持多种命名）。
+func findModelFile(dir string) string {
+	candidates := []string{
+		"model.onnx",
+		"model.int8.onnx",
+		"encoder.onnx",
+		"encoder.int8.onnx",
+		"paraformer.onnx",
+	}
+	for _, name := range candidates {
+		p := filepath.Join(dir, name)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}

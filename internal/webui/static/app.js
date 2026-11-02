@@ -324,3 +324,63 @@
     });
   });
 })();
+
+// ===== ASR 配置 =====
+(function () {
+  const form = document.getElementById('asr-form');
+  if (!form) return;
+
+  const backendSel = document.getElementById('asr-form-backend');
+
+  // 载入当前配置
+  fetch('/api/asr')
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) return;
+      backendSel.value = d.backend || 'none';
+      document.getElementById('asr-form-model-dir').value = d.model_dir || '';
+      document.getElementById('asr-form-cli').value = d.cli_path || '';
+      document.getElementById('asr-form-endpoint').value = d.endpoint || '';
+      document.getElementById('asr-form-language').value = d.language || '';
+      if (d.api_key_set) {
+        document.getElementById('asr-form-api-key').placeholder = '已设置（留空不修改）';
+      }
+    })
+    .catch(() => {});
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errBox = document.getElementById('asr-error');
+    const okBox = document.getElementById('asr-success');
+    errBox.hidden = true; okBox.hidden = true;
+
+    const payload = {
+      backend: backendSel.value,
+      model_dir: document.getElementById('asr-form-model-dir').value.trim(),
+      cli_path: document.getElementById('asr-form-cli').value.trim(),
+      api_key: document.getElementById('asr-form-api-key').value.trim(),
+      endpoint: document.getElementById('asr-form-endpoint').value.trim(),
+      language: document.getElementById('asr-form-language').value.trim()
+    };
+
+    try {
+      const res = await fetch('/api/asr', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const d = await res.json();
+      if (res.ok) {
+        okBox.textContent = '配置已保存';
+        okBox.hidden = false;
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        errBox.textContent = d.error || '保存失败';
+        errBox.hidden = false;
+      }
+    } catch (err) {
+      errBox.textContent = '网络错误：' + err.message;
+      errBox.hidden = false;
+    }
+  });
+})();

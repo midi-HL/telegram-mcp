@@ -12,12 +12,12 @@
 ```json
 {
   "profile": {
-    "id": 6834764154,
+    "id": 123456789,
     "first_name": "辰星",
     "last_name": "（Edwin 2J)",
-    "username": "Edwin_hlcx",
-    "usernames": ["Edwin_hlcx"],
-    "phone": "601110558907",
+    "username": "example_user",
+    "usernames": ["example_user"],
+    "phone": "60123456789",
     "bio": "The stars in the sky are not as bright as you.",
     "status": "最近上线 2026-11-02 11:20",
     "last_seen": 1730000000,
@@ -113,7 +113,7 @@
 
 | 场景 | 示例 | 说明 |
 |---|---|---|
-| 用户 | `8943529448` | 正数 |
+| 用户 | `123456789` | 正数 |
 | 基础群 | `-123456789` | 负数 |
 | 超级群/频道 | `-1001234567890` | `-100` 前缀 |
 

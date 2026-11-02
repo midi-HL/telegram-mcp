@@ -156,11 +156,11 @@
 ## 典型场景：领福利 Bot
 
 ```
-用户："用 @gemini_plusv_bot 领一下今天的签到"
+用户："用 @example_bot 领一下今天的签到"
 
 模型执行：
-1. botuse start @gemini_plusv_bot          → 拿到欢迎消息
-2. botuse read_replies @gemini_plusv_bot   → 看到"📋 Daily Check-in"按钮
+1. botuse start @example_bot          → 拿到欢迎消息
+2. botuse read_replies @example_bot   → 看到"📋 Daily Check-in"按钮
 3. botuse buttons msg_id=353               → 按钮列表
 4. botuse click msg_id=353 index=1         → 点"Check-in"
 5. botuse read_replies                     → 看到"✅ Check-in Successful! +5 points"

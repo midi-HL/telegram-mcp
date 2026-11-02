@@ -178,8 +178,8 @@ func runStage1(bin string) {
 	})
 
 	// 3. contact info 自己
-	check("contact info (自己 @HL_Mutsumi)", func() error {
-		text, err := c.toolCall("contact", map[string]any{"action": "info", "user": "@HL_Mutsumi"})
+	check("contact info (自己 @example_account)", func() error {
+		text, err := c.toolCall("contact", map[string]any{"action": "info", "user": "@example_account"})
 		if err != nil {
 			return err
 		}
@@ -213,8 +213,8 @@ func runStage1(bin string) {
 	})
 
 	// 4. contact info 大号
-	check("contact info (@Edwin_hlcx 你的大号)", func() error {
-		text, err := c.toolCall("contact", map[string]any{"action": "info", "user": "@Edwin_hlcx"})
+	check("contact info (@example_user 你的大号)", func() error {
+		text, err := c.toolCall("contact", map[string]any{"action": "info", "user": "@example_user"})
 		if err != nil {
 			return err
 		}
@@ -285,7 +285,7 @@ func runStage1Send(bin string) {
 
 	target := os.Getenv("TGMCP_TEST_TARGET")
 	if target == "" {
-		target = "@Edwin_hlcx"
+		target = "@example_user"
 	}
 	msgText := fmt.Sprintf("[tgmcp 自动测试] %s", time.Now().Format("15:04:05"))
 
@@ -506,8 +506,8 @@ func runStage2(bin string) {
 	})
 
 	// 5. botuse start 福利 Bot
-	check("botuse start @gemini_plusv_bot", func() error {
-		text, err := c.toolCall("botuse", map[string]any{"action": "start", "bot": "@gemini_plusv_bot"})
+	check("botuse start @example_bot", func() error {
+		text, err := c.toolCall("botuse", map[string]any{"action": "start", "bot": "@example_bot"})
 		if err != nil {
 			return err
 		}

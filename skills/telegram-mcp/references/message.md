@@ -111,7 +111,7 @@
   "reply_to": 359,
   "reply": {
     "msg_id": 359,
-    "sender": "若叶睦 | Edwin 3J | Mutsumi",
+    "sender": "示例用户",
     "text": "[引用测试] 原图",
     "media": "photo",
     "media_meta": {"kind": "photo", "w": 1536, "h": 1872, "size": 526964},

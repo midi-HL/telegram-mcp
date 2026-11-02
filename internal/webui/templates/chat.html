@@ -1,0 +1,22 @@
+{{define "chat.html"}}{{template "layout" .}}{{end}}
+
+{{define "content-chat"}}
+<h1>聊天</h1>
+
+<div class="chat-layout">
+  <aside class="chat-sidebar">
+    <div class="chat-sidebar-head">会话列表</div>
+    <div id="chat-list" class="chat-list">加载中…</div>
+  </aside>
+
+  <section class="chat-main">
+    <div class="chat-main-head" id="chat-title">选择一个会话</div>
+    <div id="message-list" class="message-list"></div>
+    <div class="chat-compose">
+      <textarea id="compose-text" placeholder="输入消息…（Ctrl+Enter 发送）" rows="2"></textarea>
+      <button id="send-btn">发送</button>
+    </div>
+    <div id="chat-error" class="error" hidden></div>
+  </section>
+</div>
+{{end}}

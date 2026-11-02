@@ -1,0 +1,52 @@
+# 二进制
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试
+*.test
+*.out
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 项目数据（★ 绝不可提交）
+/data/
+*.session
+*.session-journal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+config.toml
+config.json
+
+# 凭据
+.env
+.env.*
+*.pem
+*.key
+*.jks
+*.keystore
+api_id
+api_hash
+
+# ASR 模型
+/models/
+*.onnx
+*.tar.bz2
+
+# 临时
+/tmp/
+*.log

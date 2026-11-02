@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · Telegram MCP</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+<div class="login-card">
+  <h1>Telegram MCP</h1>
+  {{if .IsDefault}}<p class="hint">默认密码：Admin</p>{{end}}
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  <form id="login-form">
+    <input type="password" id="password" name="password" placeholder="密码" autocomplete="current-password" autofocus required>
+    <button type="submit">登录</button>
+  </form>
+  <div id="login-error" class="error" hidden></div>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errBox = document.getElementById('login-error');
+  errBox.hidden = true;
+  const btn = e.target.querySelector('button');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: document.getElementById('password').value})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      window.location.href = '/ui/accounts';
+    } else {
+      errBox.textContent = data.error || '登录失败';
+      errBox.hidden = false;
+    }
+  } catch (err) {
+    errBox.textContent = '网络错误：' + err.message;
+    errBox.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

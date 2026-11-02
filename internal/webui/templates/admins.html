@@ -1,0 +1,39 @@
+{{define "admins.html"}}{{template "layout" .}}{{end}}
+
+{{define "content-admins"}}
+<h1>管理员</h1>
+
+<div class="card">
+  <p class="hint">
+    ⚠ 管理员消息不会被标记为外部内容，可调用所有工具（含高危操作）。建议只添加自己。
+    <br>
+    输入用户名后系统会自动解析成数字 ID 保存——用户名可被修改或抢注，只有数字 ID 才可靠。
+  </p>
+  <form id="add-admin-form" class="inline-form">
+    <input type="text" id="admin-username" placeholder="@username" required>
+    <button type="submit">添加管理员</button>
+  </form>
+  <div id="admin-error" class="error" hidden></div>
+  <div id="admin-success" class="success" hidden></div>
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr><th>User ID</th><th>用户名（快照）</th><th>添加时间</th><th>操作</th></tr>
+    </thead>
+    <tbody id="admin-list">
+    {{range .Data}}
+      <tr>
+        <td><code>{{.UserID}}</code></td>
+        <td>{{if .Username}}@{{.Username}}{{else}}—{{end}}</td>
+        <td>{{.AddedAt}}</td>
+        <td><button class="btn-danger" data-user-id="{{.UserID}}">删除</button></td>
+      </tr>
+    {{else}}
+      <tr><td colspan="4" class="empty">暂无管理员</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

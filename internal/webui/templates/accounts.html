@@ -1,0 +1,37 @@
+{{define "accounts.html"}}{{template "layout" .}}{{end}}
+
+{{define "content-accounts"}}
+<h1>账号管理</h1>
+
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr><th>账号名</th><th>User ID</th><th>用户名</th><th>昵称</th><th>手机号</th><th>状态</th></tr>
+    </thead>
+    <tbody>
+    {{range .Data}}
+      <tr>
+        <td>{{.Name}}{{if .IsDefault}} <span class="badge">默认</span>{{end}}</td>
+        <td>{{if .UserID}}{{.UserID}}{{else}}—{{end}}</td>
+        <td>{{if .Username}}@{{.Username}}{{else}}—{{end}}</td>
+        <td>{{.FirstName}}</td>
+        <td>{{if .Phone}}{{.Phone}}{{else}}—{{end}}</td>
+        <td>{{if .Ready}}<span class="ok">✓ 就绪</span>{{else}}<span class="warn">未就绪</span>{{end}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="6" class="empty">暂无账号，请先用命令行运行 <code>tgmcp auth</code></td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>添加账号</h2>
+  <p class="hint">在运行服务的机器上执行：<code>tgmcp auth --account &lt;名字&gt; --qr</code> 或 <code>--phone &lt;号码&gt;</code>，然后重启服务。</p>
+</div>
+
+<div class="card">
+  <h2>缓存状态</h2>
+  <div id="cache-stats" class="stats">加载中…</div>
+</div>
+{{end}}

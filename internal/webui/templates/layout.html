@@ -1,0 +1,35 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} · Telegram MCP</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{{if .IsDefaultPwd}}
+<div class="banner-warn">
+  ⚠ 当前仍使用默认密码，请前往<a href="/ui/settings">设置</a>修改
+</div>
+{{end}}
+<header class="topbar">
+  <a href="/ui/accounts" class="brand">Telegram MCP</a>
+  <nav>
+    <a href="/ui/accounts" {{if eq .Active "accounts"}}class="active"{{end}}>账号</a>
+    <a href="/ui/chat" {{if eq .Active "chat"}}class="active"{{end}}>聊天</a>
+    <a href="/ui/autoreply" {{if eq .Active "autoreply"}}class="active"{{end}}>自动回复</a>
+    <a href="/ui/admins" {{if eq .Active "admins"}}class="active"{{end}}>管理员</a>
+    <a href="/ui/settings" {{if eq .Active "settings"}}class="active"{{end}}>设置</a>
+  </nav>
+  <button id="logout-btn" class="btn-ghost">登出</button>
+</header>
+<main>
+{{if eq .Active "chat"}}{{template "content-chat" .}}
+{{else if eq .Active "autoreply"}}{{template "content-autoreply" .}}
+{{else if eq .Active "admins"}}{{template "content-admins" .}}
+{{else if eq .Active "settings"}}{{template "content-settings" .}}
+{{else}}{{template "content-accounts" .}}{{end}}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>{{end}}

@@ -1,0 +1,27 @@
+{{define "settings.html"}}{{template "layout" .}}{{end}}
+
+{{define "content-settings"}}
+<h1>设置</h1>
+
+<div class="card">
+  <h2>修改密码</h2>
+  {{if .IsDefaultPwd}}<p class="warn">当前仍是默认密码 Admin，请尽快修改。</p>{{end}}
+  <form id="password-form" class="stack-form">
+    <label>当前密码<input type="password" id="old-password" autocomplete="current-password" required></label>
+    <label>新密码（至少 8 位）<input type="password" id="new-password" autocomplete="new-password" required minlength="8"></label>
+    <label>确认新密码<input type="password" id="confirm-password" autocomplete="new-password" required minlength="8"></label>
+    <button type="submit">修改密码</button>
+  </form>
+  <div id="pwd-error" class="error" hidden></div>
+  <div id="pwd-success" class="success" hidden></div>
+</div>
+
+<div class="card">
+  <h2>服务信息</h2>
+  <table class="table">
+    <tr><th>数据目录</th><td><code>{{.Data.DataDir}}</code></td></tr>
+    <tr><th>监听地址</th><td><code>{{.Data.Host}}:{{.Data.Port}}</code></td></tr>
+    <tr><th>ASR 后端</th><td><code>{{.Data.ASR}}</code></td></tr>
+  </table>
+</div>
+{{end}}

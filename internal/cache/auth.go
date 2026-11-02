@@ -14,7 +14,15 @@ import (
 const DefaultWebUIPassword = "Admin"
 
 // bcrypt 成本因子。12 在现代硬件上约 250ms，平衡安全与体验。
-const bcryptCost = 12
+// 测试时通过 SetBcryptCost 降低到 4（约 1ms），避免测试超时。
+var bcryptCost = 12
+
+// SetBcryptCost 修改 bcrypt 成本（仅供测试）。
+func SetBcryptCost(c int) {
+	if c >= bcrypt.MinCost && c <= bcrypt.MaxCost {
+		bcryptCost = c
+	}
+}
 
 // SessionTTL 是 Web UI 会话有效期。
 const SessionTTL = 24 * time.Hour

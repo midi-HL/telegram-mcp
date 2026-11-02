@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+func init() {
+	// 测试用低 cost（4），避免 -race 模式下超时
+	SetBcryptCost(4)
+}
+
 func TestEnsureWebUICredential(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

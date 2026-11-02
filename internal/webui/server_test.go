@@ -15,6 +15,11 @@ import (
 	tgclient "github.com/midi-HL/telegram-mcp/internal/telegram"
 )
 
+func init() {
+	// 测试用低 cost（4），避免 -race 模式下超时
+	cache.SetBcryptCost(4)
+}
+
 func newTestServer(t *testing.T) (*Server, *cache.Store) {
 	t.Helper()
 	dir := t.TempDir()

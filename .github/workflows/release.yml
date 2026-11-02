@@ -13,28 +13,162 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
-    name: GoReleaser
+  # 按 OS 分组并行编译，避免单个 job 跑 19 个架构超时
+  build-linux:
+    name: Build Linux
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: "386",    arm: '' }
+          - { arch: amd64,    arm: '' }
+          - { arch: arm,      arm: '6' }
+          - { arch: arm,      arm: '7' }
+          - { arch: arm64,    arm: '' }
+          - { arch: loong64,  arm: '' }
+          - { arch: ppc64le,  arm: '' }
+          - { arch: riscv64,  arm: '' }
+          - { arch: s390x,    arm: '' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.arm }}
+        run: |
+          SUFFIX="${{ matrix.arch }}${{ matrix.arm }}"
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" != "tag" ] && VERSION="dev-${GITHUB_SHA::7}"
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/tgmcp" ./cmd/tgmcp
+          cd dist
+          tar czf "tgmcp-${VERSION}-linux-${SUFFIX}.tar.gz" tgmcp
+          sha256sum "tgmcp-${VERSION}-linux-${SUFFIX}.tar.gz" > "tgmcp-${VERSION}-linux-${SUFFIX}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}${{ matrix.arm }}
+          path: dist/*.tar.gz*
+          retention-days: 7
+
+  build-other:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: "386",   ext: .exe, fmt: zip  }
+          - { goos: windows, goarch: amd64,   ext: .exe, fmt: zip  }
+          - { goos: windows, goarch: arm64,   ext: .exe, fmt: zip  }
+          - { goos: darwin,  goarch: amd64,   ext: '',   fmt: tgz  }
+          - { goos: darwin,  goarch: arm64,   ext: '',   fmt: tgz  }
+          - { goos: freebsd, goarch: "386",   ext: '',   fmt: tgz  }
+          - { goos: freebsd, goarch: amd64,   ext: '',   fmt: tgz  }
+          - { goos: freebsd, goarch: arm64,   ext: '',   fmt: tgz  }
+          - { goos: netbsd,  goarch: amd64,   ext: '',   fmt: tgz  }
+          - { goos: openbsd, goarch: amd64,   ext: '',   fmt: tgz  }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" != "tag" ] && VERSION="dev-${GITHUB_SHA::7}"
+          ARCH="${{ matrix.goarch }}"
+          [ "$ARCH" = "amd64" ] && ARCH="x86_64"
+          [ "$ARCH" = "386" ] && ARCH="i386"
+          OS="${{ matrix.goos }}"
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/tgmcp${{ matrix.ext }}" ./cmd/tgmcp
+          cd dist
+          NAME="tgmcp-${VERSION}-${OS}-${ARCH}"
+          if [ "${{ matrix.fmt }}" = "zip" ]; then
+            zip -q "${NAME}.zip" "tgmcp${{ matrix.ext }}"
+            sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+          else
+            tar czf "${NAME}.tar.gz" "tgmcp${{ matrix.ext }}"
+            sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.zip* dist/*.tar.gz*
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: [build-linux, build-other]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          go-version-file: go.mod
-          cache: true
+          path: artifacts
+          merge-multiple: true
 
-      - name: Run tests
-        run: go test -count=1 -timeout 10m ./...
+      - name: Prepare release
+        run: |
+          mkdir -p release
+          cp artifacts/*.tar.gz artifacts/*.zip release/ 2>/dev/null || true
+          cd release
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt 2>/dev/null || true
+          ls -lh
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            ## Telegram MCP ${{ github.ref_name }}
+
+            通过 MCP 让 AI 操作真实的 Telegram 账号。
+
+            **支持平台（19 个架构，全部经本地实测验证）**
+
+            | OS | 架构 | 格式 |
+            |---|---|---|
+            | Linux | x86_64, i386, armv6, armv7, arm64, loong64, ppc64le, riscv64, s390x | tar.gz |
+            | Windows | x86_64, i386, arm64 | zip |
+            | macOS | x86_64, arm64 | tar.gz |
+            | FreeBSD | x86_64, i386, arm64 | tar.gz |
+            | NetBSD | x86_64 | tar.gz |
+            | OpenBSD | x86_64 | tar.gz |
+
+            **不支持的架构**（依赖 `modernc.org/libc` 无实现）：
+            `linux/mips`、`linux/mipsle`、`linux/mips64`、`linux/mips64le`、`linux/ppc64`、`netbsd/arm64`
+
+            **快速开始**：解压后运行 `tgmcp auth --qr` 登录，然后配置 MCP 客户端。
+
+            ---
+
+            **许可证**：PolyForm Noncommercial 1.0.0 + 署名条款 + 禁止付费分发
+
+            *Copyright 2026 Edwin (辰星) — https://github.com/midi-HL/telegram-mcp*

@@ -1,4 +1,4 @@
-# GoReleaser 配置 — 产物矩阵经本地实测验证（20 个架构）
+# GoReleaser 配置 — 产物矩阵经本地实测验证（19 个架构）
 # 文档：https://goreleaser.com
 #
 # 排除的 6 个架构（modernc.org/libc 无实现）：
@@ -190,7 +190,7 @@ release:
     通过 MCP 让 AI 操作真实的 Telegram 账号。
 
 
-    **支持平台（20 个架构，均经实测验证）**
+    **支持平台（19 个架构，均经实测验证）**
 
 
     | OS | 架构 | 格式 |

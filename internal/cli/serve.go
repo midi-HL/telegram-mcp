@@ -39,26 +39,32 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(cfg.Accounts) == 0 {
-		return fmt.Errorf("没有已配置的账号，请先运行 `tgmcp auth`")
-	}
 
+	// ★ 不因"没有账号"而拒绝启动：Web UI 必须先起来，让用户在浏览器里
+	//   填 API 凭据 + 扫码/手机号登录。账号就绪与否不影响 Web UI。
 	defaultAccount := *accountName
 	if defaultAccount == "" {
 		defaultAccount = cfg.DefaultAccount
 	}
-	if cfg.Account(defaultAccount) == nil {
-		return fmt.Errorf("账号 %q 不存在，已配置：%v", defaultAccount, accountNames(cfg))
+	if defaultAccount == "" {
+		defaultAccount = "main"
 	}
 
-	// 构造账号池
+	// 构造账号池（配置里没有账号时是空池，登录成功后动态加入）
 	pool := tgclient.NewPool(a.Logger)
 	for _, ac := range cfg.Accounts {
 		acc, err := tgclient.NewAccount(ac)
 		if err != nil {
-			return fmt.Errorf("初始化账号 %q: %w", ac.Name, err)
+			// 单个账号配置错误不应阻止整个服务启动
+			a.Logger.Warn("账号初始化失败，已跳过",
+				zap.String("account", ac.Name), zap.Error(err))
+			continue
 		}
 		pool.Add(acc)
+	}
+	if pool.Len() == 0 {
+		a.Logger.Info("当前没有可用账号，请在 Web UI 中完成登录",
+			zap.String("webui", fmt.Sprintf("http://%s:%d/ui", cfg.WebUI.Host, cfg.WebUI.Port)))
 	}
 
 	// 自动回复引擎（延迟到 store 打开后初始化）
@@ -66,6 +72,59 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// ★ 先打开缓存 + 启动 Web UI，再连账号。
+	//   这样即使账号未登录/连接失败，浏览器也能访问 UI 完成登录。
+	store, err := cache.Open(cfg.DataDir)
+	if err != nil {
+		a.Logger.Warn("缓存不可用，将直接走 Telegram API", zap.Error(err))
+	} else {
+		defer func() { _ = store.Close() }()
+		a.Logger.Info("缓存已打开", zap.String("path", store.Path()))
+	}
+
+	// 信任体系
+	var guard *trust.Guard
+	if store != nil {
+		guard = trust.New(store)
+	}
+
+	// 自动回复引擎
+	if store != nil {
+		rs := autoreply.NewRuleStore(store)
+		autoReplyEngine = autoreply.New(autoreply.Config{
+			Rules:  rs,
+			Pool:   pool,
+			Reply:  autoreply.SimpleReply,
+			Logger: a.Logger,
+		})
+	}
+
+	deps := &tgmcp.Deps{
+		Config:         cfg,
+		Pool:           pool,
+		Cache:          store,
+		Logger:         a.Logger,
+		DefaultAccount: defaultAccount,
+		Guard:          guard,
+		AutoReply:      autoReplyEngine,
+	}
+
+	// ★ Web UI 立即启动（独立端口），不等待任何账号
+	if cfg.WebUI.Enabled {
+		ui, err := webui.NewWithAutoReply(cfg, store, pool, autoReplyEngine, a.Logger)
+		if err != nil {
+			a.Logger.Error("Web UI 初始化失败", zap.Error(err))
+		} else {
+			go func() {
+				if err := ui.Run(runCtx); err != nil && runCtx.Err() == nil {
+					a.Logger.Error("Web UI 运行失败", zap.Error(err))
+				}
+			}()
+			a.Logger.Info("Web UI 已就绪，可立即在浏览器中登录",
+				zap.String("url", fmt.Sprintf("http://%s:%d/ui", cfg.WebUI.Host, cfg.WebUI.Port)))
+		}
+	}
 
 	// 每个账号就绪后关闭自己的 ready channel
 	type readyState struct {
@@ -142,72 +201,24 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		}(st)
 	}
 
-	// 等待所有账号就绪（或超时）
-	readyCtx, readyCancel := context.WithTimeout(runCtx, *readyWait)
-	defer readyCancel()
-	allReady := true
-	for _, st := range states {
-		select {
-		case <-st.ready:
-		case <-readyCtx.Done():
-			a.Logger.Warn("等待账号就绪超时，继续启动 MCP 服务",
-				zap.String("account", st.acc.Name))
-			allReady = false
+	// 后台等待账号就绪（不阻塞 Web UI / MCP 传输）
+	go func() {
+		if len(states) == 0 {
+			return
 		}
-	}
-	if !allReady {
-		a.Logger.Warn("部分账号未就绪，工具调用可能失败")
-	}
-
-	// 打开缓存
-	store, err := cache.Open(cfg.DataDir)
-	if err != nil {
-		a.Logger.Warn("缓存不可用，将直接走 Telegram API", zap.Error(err))
-	} else {
-		defer func() { _ = store.Close() }()
-		a.Logger.Info("缓存已打开", zap.String("path", store.Path()))
-	}
-
-	// 信任体系
-	var guard *trust.Guard
-	if store != nil {
-		guard = trust.New(store)
-	}
-
-	// 自动回复引擎
-	if store != nil {
-		rs := autoreply.NewRuleStore(store)
-		autoReplyEngine = autoreply.New(autoreply.Config{
-			Rules:  rs,
-			Pool:   pool,
-			Reply:  autoreply.SimpleReply,
-			Logger: a.Logger,
-		})
-	}
-
-	deps := &tgmcp.Deps{
-		Config:         cfg,
-		Pool:           pool,
-		Cache:          store,
-		Logger:         a.Logger,
-		DefaultAccount: defaultAccount,
-		Guard:          guard,
-		AutoReply:      autoReplyEngine,
-	}
-
-	// 启动 Web UI（独立端口）
-	var webErr chan error
-	if cfg.WebUI.Enabled {
-		ui, err := webui.NewWithAutoReply(cfg, store, pool, autoReplyEngine, a.Logger)
-		if err != nil {
-			a.Logger.Warn("Web UI 初始化失败", zap.Error(err))
-		} else {
-			webErr = make(chan error, 1)
-			go func() {
-				webErr <- ui.Run(runCtx)
-			}()
+		readyCtx, readyCancel := context.WithTimeout(runCtx, *readyWait)
+		defer readyCancel()
+		for _, st := range states {
+			select {
+			case <-st.ready:
+			case <-readyCtx.Done():
+				a.Logger.Warn("账号就绪超时（服务继续运行，可在 Web UI 中登录）",
+					zap.String("account", st.acc.Name))
+				return
+			}
 		}
-	}
+		a.Logger.Info("全部账号已就绪")
+	}()
 
 	if *useHTTP {
 		httpPort := *port

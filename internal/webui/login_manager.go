@@ -265,8 +265,6 @@ func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgcli
 
 			// 注册到池
 			m.pool.Add(acc)
-			// 后台保持连接
-			go m.keepAlive(acc)
 
 			sess.mu.Lock()
 			sess.state = StateSuccess
@@ -277,23 +275,16 @@ func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgcli
 			m.logger.Info("扫码登录成功",
 				zap.String("account", sess.account),
 				zap.Int64("user_id", st.UserID))
+
+			// ★ 不要从 Run 回调返回：返回会关闭客户端，而 gotd 不允许
+			//   对同一 Client 再次 Run。保持在此直到上下文取消。
+			<-ctx.Done()
 			return nil
 		})
 	})
 	if err != nil && sess.Snap().State != StateSuccess {
 		sess.setError(fmt.Sprintf("连接失败: %v", err))
 	}
-}
-
-// keepAlive 保持账号连接（供已登录账号使用）。
-func (m *LoginManager) keepAlive(acc *tgclient.Account) {
-	waiter := tgclient.NewFloodWaiter(m.logger)
-	_ = waiter.Run(context.Background(), func(ctx context.Context) error {
-		return acc.Client().Run(ctx, func(ctx context.Context) error {
-			<-ctx.Done()
-			return nil
-		})
-	})
 }
 
 // StartPhone 启动手机号登录。
@@ -403,7 +394,6 @@ func (m *LoginManager) runPhone(ctx context.Context, sess *LoginSession, acc *tg
 			}
 
 			m.pool.Add(acc)
-			go m.keepAlive(acc)
 
 			sess.mu.Lock()
 			sess.state = StateSuccess
@@ -413,6 +403,9 @@ func (m *LoginManager) runPhone(ctx context.Context, sess *LoginSession, acc *tg
 			m.logger.Info("手机号登录成功",
 				zap.String("account", sess.account),
 				zap.Int64("user_id", st.UserID))
+
+			// 保持连接直到上下文取消（不要返回，见 runQR 注释）
+			<-ctx.Done()
 			return nil
 		})
 	})

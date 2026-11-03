@@ -1,5 +1,7 @@
 # Telegram MCP
 
+[中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md) | [Русский](README_RU.md)
+
 通过 [MCP](https://modelcontextprotocol.io) 让 AI 操作真实的 Telegram 账号——收发消息、管理群组频道、查看用户资料、操作 Bot、语音转写。
 
 不是 Bot API，是**完整的 MTProto 客户端**：能读个人聊天历史、能管理 Bot、能做 Bot API 做不到的事。

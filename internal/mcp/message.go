@@ -16,36 +16,36 @@ import (
 // MessageInput 是 message 工具的输入。
 type MessageInput struct {
 	// Action: send / edit / delete / forward / search / history / react / pin
-	Action string `json:"action" jsonschema:"send|edit|delete|forward|search|history|react|pin"`
-	Chat   string `json:"chat,omitempty" jsonschema:"chat id or @username"`
-	Text   string `json:"text,omitempty" jsonschema:"text"`
-	MsgID  int    `json:"msg_id,omitempty" jsonschema:"msg id"`
-	To     string `json:"to,omitempty" jsonschema:"target chat"`
-	Query  string `json:"query,omitempty" jsonschema:"query"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"default 20, max 100"`
-	Before int    `json:"before_id,omitempty" jsonschema:"before msg id"`
-	ReplyTo int   `json:"reply_to,omitempty" jsonschema:"reply to"`
-	Silent  bool  `json:"silent,omitempty" jsonschema:"silent"`
-	Emoji   string `json:"emoji,omitempty" jsonschema:"emoji"`
+	Action  string   `json:"action" jsonschema:"send|edit|delete|forward|search|history|react|pin"`
+	Chat    string   `json:"chat,omitempty" jsonschema:"chat id or @username"`
+	Text    string   `json:"text,omitempty" jsonschema:"text"`
+	MsgID   int      `json:"msg_id,omitempty" jsonschema:"msg id"`
+	To      string   `json:"to,omitempty" jsonschema:"target chat"`
+	Query   string   `json:"query,omitempty" jsonschema:"query"`
+	Limit   int      `json:"limit,omitempty" jsonschema:"default 20, max 100"`
+	Before  int      `json:"before_id,omitempty" jsonschema:"before msg id"`
+	ReplyTo int      `json:"reply_to,omitempty" jsonschema:"reply to"`
+	Silent  bool     `json:"silent,omitempty" jsonschema:"silent"`
+	Emoji   string   `json:"emoji,omitempty" jsonschema:"emoji"`
 	Expand  []string `json:"expand,omitempty" jsonschema:"full"`
-	Account string `json:"account,omitempty" jsonschema:"account name"`
+	Account string   `json:"account,omitempty" jsonschema:"account name"`
 }
 
 // MessageOutput 是 message 工具的输出。
 type MessageOutput struct {
-	Action   string              `json:"action"`
-	Messages []dto.MessageBrief  `json:"messages,omitempty"`
-	Message  *dto.MessageFull    `json:"message,omitempty"`
-	MsgID    int                 `json:"msg_id,omitempty"`
-	Count    int                 `json:"count,omitempty"`
-	Note     string              `json:"note,omitempty"`
-	Message2 string              `json:"message_text,omitempty"`
+	Action   string             `json:"action"`
+	Messages []dto.MessageBrief `json:"messages,omitempty"`
+	Message  *dto.MessageFull   `json:"message,omitempty"`
+	MsgID    int                `json:"msg_id,omitempty"`
+	Count    int                `json:"count,omitempty"`
+	Note     string             `json:"note,omitempty"`
+	Message2 string             `json:"message_text,omitempty"`
 }
 
 // registerMessageTools 注册 message 工具。
 func registerMessageTools(s *mcp.Server, deps *Deps) {
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "message",
+		Name:        "message",
 		Description: "消息收发。action: send 发送 / edit 编辑 / delete 删除 / forward 转发 / search 搜索 / history 历史 / react 反应 / pin 置顶",
 		Annotations: &mcp.ToolAnnotations{Title: "消息", ReadOnlyHint: false},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in MessageInput) (*mcp.CallToolResult, MessageOutput, error) {
@@ -256,8 +256,9 @@ func handleSearch(ctx context.Context, deps *Deps, in MessageInput, out MessageO
 	}
 
 	req := &tg.MessagesSearchRequest{
-		Q:     in.Query,
-		Limit: limit,
+		Q:      in.Query,
+		Filter: &tg.InputMessagesFilterEmpty{},
+		Limit:  limit,
 	}
 	if in.Chat != "" {
 		peer, err := resolver.Resolve(ctx, in.Chat)

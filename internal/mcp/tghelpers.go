@@ -28,126 +28,177 @@ type dialogItem struct {
 	AccessHash  int64
 }
 
-// fetchDialogs 拉取会话列表并投影。
-func fetchDialogs(ctx context.Context, api *tg.Client, limit int) ([]dialogItem, error) {
-	res, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-		OffsetDate: 0,
-		OffsetID:   0,
-		OffsetPeer: &tg.InputPeerEmpty{},
-		Limit:      limit,
-	})
-	if err != nil {
-		return nil, err
+// fetchDialogs 分页拉取会话列表并投影。
+// target 是累计需要的会话数，offset 用于跳过前 N 个（给上层做分页）。
+func fetchDialogs(ctx context.Context, api *tg.Client, target int, offset int) ([]dialogItem, error) {
+	if target <= 0 {
+		target = 50
 	}
-
-	var dialogs []tg.DialogClass
-	var users []tg.UserClass
-	var chats []tg.ChatClass
-	switch v := res.(type) {
-	case *tg.MessagesDialogs:
-		dialogs, users, chats = v.Dialogs, v.Users, v.Chats
-	case *tg.MessagesDialogsSlice:
-		dialogs, users, chats = v.Dialogs, v.Users, v.Chats
-	default:
-		return nil, nil
+	need := offset + target
+	if need > 1000 {
+		need = 1000
 	}
+	const pageSize = 100
 
-	// 建立 ID → 实体映射
-	userMap := make(map[int64]*tg.User, len(users))
-	for _, u := range users {
-		if user, ok := u.(*tg.User); ok {
-			userMap[user.ID] = user
+	out := make([]dialogItem, 0, target)
+	seen := make(map[int64]bool)
+	var offsetDate, offsetID int
+	var offsetPeer tg.InputPeerClass = &tg.InputPeerEmpty{}
+
+	for len(out) < need {
+		batchLimit := pageSize
+		if remain := need - len(out); remain < batchLimit {
+			batchLimit = remain
 		}
-	}
-	chatMap := make(map[int64]tg.ChatClass, len(chats))
-	channelMap := make(map[int64]*tg.Channel, len(chats))
-	for _, c := range chats {
-		switch ch := c.(type) {
-		case *tg.Channel:
-			chatMap[ch.ID] = ch
-			channelMap[ch.ID] = ch
-		case *tg.Chat:
-			chatMap[ch.ID] = ch
+		res, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+			OffsetDate: offsetDate,
+			OffsetID:   offsetID,
+			OffsetPeer: offsetPeer,
+			Limit:      batchLimit,
+		})
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	out := make([]dialogItem, 0, len(dialogs))
-	for _, d := range dialogs {
-		var dialog *tg.Dialog
-		switch v := d.(type) {
-		case *tg.Dialog:
-			dialog = v
-		case *tg.DialogFolder:
-			// 文件夹条目，跳过
-			continue
+		var dialogs []tg.DialogClass
+		var users []tg.UserClass
+		var chats []tg.ChatClass
+		var messages []tg.MessageClass
+		switch v := res.(type) {
+		case *tg.MessagesDialogs:
+			dialogs, users, chats, messages = v.Dialogs, v.Users, v.Chats, v.Messages
+		case *tg.MessagesDialogsSlice:
+			dialogs, users, chats, messages = v.Dialogs, v.Users, v.Chats, v.Messages
 		default:
-			continue
+			break
+		}
+		if len(dialogs) == 0 {
+			break
 		}
 
-		item := dialogItem{
-			Unread: dialog.UnreadCount,
-			Pinned: dialog.Pinned,
-		}
-		if mute, ok := dialog.NotifySettings.GetMuteUntil(); ok {
-			item.Muted = mute > 0
-		}
-
-		switch peer := dialog.Peer.(type) {
-		case *tg.PeerUser:
-			u := userMap[peer.UserID]
-			if u == nil {
-				continue
+		userMap := make(map[int64]*tg.User, len(users))
+		for _, u := range users {
+			if user, ok := u.(*tg.User); ok {
+				userMap[user.ID] = user
 			}
-			item.ID = u.ID
-			item.Title = displayName(u)
-			item.Type = dto.ChatTypeUser
-			item.Username, _ = u.GetUsername()
-			item.AccessHash = u.AccessHash
-			item.CanSend = true
-		case *tg.PeerChat:
-			c, ok := chatMap[peer.ChatID].(*tg.Chat)
+		}
+		chatMap := make(map[int64]tg.ChatClass, len(chats))
+		channelMap := make(map[int64]*tg.Channel, len(chats))
+		for _, c := range chats {
+			switch ch := c.(type) {
+			case *tg.Channel:
+				chatMap[ch.ID], channelMap[ch.ID] = ch, ch
+			case *tg.Chat:
+				chatMap[ch.ID] = ch
+			}
+		}
+		msgMap := make(map[int]*tg.Message, len(messages))
+		for _, m := range messages {
+			if msg, ok := m.(*tg.Message); ok {
+				msgMap[msg.ID] = msg
+			}
+		}
+
+		batchCount := 0
+		var lastPeer tg.InputPeerClass
+		for _, d := range dialogs {
+			dialog, ok := d.(*tg.Dialog)
 			if !ok {
+				continue // DialogFolder 等条目跳过
+			}
+			batchCount++
+			item := dialogItem{Unread: dialog.UnreadCount, Pinned: dialog.Pinned}
+			if mute, ok := dialog.NotifySettings.GetMuteUntil(); ok {
+				item.Muted = mute > 0
+			}
+			switch peer := dialog.Peer.(type) {
+			case *tg.PeerUser:
+				u := userMap[peer.UserID]
+				if u == nil {
+					lastPeer = &tg.InputPeerUser{UserID: peer.UserID}
+					continue
+				}
+				item.ID, item.Type = u.ID, dto.ChatTypeUser
+				item.Title = displayName(u)
+				item.Username, _ = u.GetUsername()
+				item.AccessHash, item.CanSend = u.AccessHash, true
+				lastPeer = &tg.InputPeerUser{UserID: u.ID, AccessHash: u.AccessHash}
+			case *tg.PeerChat:
+				c, ok := chatMap[peer.ChatID].(*tg.Chat)
+				if !ok {
+					lastPeer = &tg.InputPeerChat{ChatID: peer.ChatID}
+					continue
+				}
+				item.ID, item.Type = c.ID, dto.ChatTypeBasicGroup
+				item.Title, item.MemberCount, item.CanSend = c.Title, c.ParticipantsCount, true
+				lastPeer = &tg.InputPeerChat{ChatID: c.ID}
+			case *tg.PeerChannel:
+				ch := channelMap[peer.ChannelID]
+				if ch == nil {
+					lastPeer = &tg.InputPeerChannel{ChannelID: peer.ChannelID}
+					continue
+				}
+				item.ID, item.Title = ch.ID, ch.Title
+				item.Username, _ = ch.GetUsername()
+				item.AccessHash = ch.AccessHash
+				if ch.Megagroup {
+					item.Type = dto.ChatTypeSupergroup
+				} else {
+					item.Type = dto.ChatTypeChannel
+				}
+				if participants, ok := ch.GetParticipantsCount(); ok {
+					item.MemberCount = participants
+				}
+				item.CanSend = ch.Megagroup
+				lastPeer = &tg.InputPeerChannel{ChannelID: ch.ID, AccessHash: ch.AccessHash}
+			}
+			if item.ID == 0 || seen[item.ID] {
 				continue
 			}
-			item.ID = c.ID
-			item.Title = c.Title
-			item.Type = dto.ChatTypeBasicGroup
-			item.MemberCount = c.ParticipantsCount
-			item.CanSend = true
-		case *tg.PeerChannel:
-			ch := channelMap[peer.ChannelID]
-			if ch == nil {
-				continue
+			seen[item.ID] = true
+			if msg := msgMap[dialog.TopMessage]; msg != nil {
+				item.LastText, item.LastAt = msg.Message, int64(msg.Date)
+			} else if dialog.TopMessage != 0 {
+				item.LastAt = int64(dialog.TopMessage)
 			}
-			item.ID = ch.ID
-			item.Title = ch.Title
-			item.Username, _ = ch.GetUsername()
-			item.AccessHash = ch.AccessHash
-			if ch.Megagroup {
-				item.Type = dto.ChatTypeSupergroup
-			} else {
-				item.Type = dto.ChatTypeChannel
+			out = append(out, item)
+			if v, ok := dialogPeerToInput(dialog.Peer); ok {
+				lastPeer = v
 			}
-			if participants, ok := ch.GetParticipantsCount(); ok {
-				item.MemberCount = participants
+			offsetID = dialog.TopMessage
+			if msg := msgMap[dialog.TopMessage]; msg != nil {
+				offsetDate = msg.Date
 			}
-			item.CanSend = ch.Megagroup
 		}
-
-		if item.ID == 0 {
-			continue
+		if batchCount == 0 || lastPeer == nil {
+			break
 		}
-
-		// 取最后一条消息的预览
-		if dialog.TopMessage != 0 {
-			item.LastText = findTopMessageText(dialogs, dialog)
-			item.LastAt = int64(dialog.TopMessage) // 占位，实际时间需从消息取
+		if _, complete := res.(*tg.MessagesDialogs); complete {
+			break // 全量返回，没有更多页
 		}
-
-		out = append(out, item)
+		offsetPeer = lastPeer
 	}
-
+	if offset >= len(out) {
+		return []dialogItem{}, nil
+	}
+	out = out[offset:]
+	if len(out) > target {
+		out = out[:target]
+	}
 	return out, nil
+}
+
+func dialogPeerToInput(p tg.PeerClass) (tg.InputPeerClass, bool) {
+	switch v := p.(type) {
+	case *tg.PeerUser:
+		return &tg.InputPeerUser{UserID: v.UserID}, true
+	case *tg.PeerChat:
+		return &tg.InputPeerChat{ChatID: v.ChatID}, true
+	case *tg.PeerChannel:
+		return &tg.InputPeerChannel{ChannelID: v.ChannelID}, true
+	default:
+		return nil, false
+	}
 }
 
 // findTopMessageText 从对话列表里找最后一条消息的文本预览。
@@ -279,6 +330,20 @@ func fetchChatFull(ctx context.Context, deps *Deps, account string, peer tg.Inpu
 	return full, nil
 }
 
+// folderPeerInfo 从分类里的 InputPeer 提取会话 ID 和类型。
+func folderPeerInfo(p tg.InputPeerClass) (int64, string) {
+	switch v := p.(type) {
+	case *tg.InputPeerUser:
+		return v.UserID, string(dto.ChatTypeUser)
+	case *tg.InputPeerChat:
+		return v.ChatID, string(dto.ChatTypeBasicGroup)
+	case *tg.InputPeerChannel:
+		return v.ChannelID, string(dto.ChatTypeChannel)
+	default:
+		return 0, ""
+	}
+}
+
 // hasAnyRight 判断管理员是否有任何权限。
 func hasAnyRight(r tg.ChatAdminRights) bool {
 	return r.ChangeInfo || r.DeleteMessages || r.BanUsers || r.InviteUsers ||
@@ -311,6 +376,39 @@ func markPeerRead(ctx context.Context, api *tg.Client, peer tg.InputPeerClass) e
 	return fmt.Errorf("不支持的 peer 类型")
 }
 
+// FolderChatIDs 实时展开指定分类里的会话 ID，供 Agent 唤醒过滤使用。
+func FolderChatIDs(ctx context.Context, api *tg.Client, folderIDs []int) map[int64]bool {
+	out := make(map[int64]bool)
+	if len(folderIDs) == 0 {
+		return out
+	}
+	want := make(map[int]bool, len(folderIDs))
+	for _, id := range folderIDs {
+		want[id] = true
+	}
+	res, err := api.MessagesGetDialogFilters(ctx)
+	if err != nil {
+		return out
+	}
+	for _, f := range res.Filters {
+		df, ok := f.(*tg.DialogFilter)
+		if !ok || !want[df.ID] {
+			continue
+		}
+		for _, p := range append(append([]tg.InputPeerClass(nil), df.PinnedPeers...), df.IncludePeers...) {
+			if id, _ := folderPeerInfo(p); id != 0 {
+				out[id] = true
+			}
+		}
+		for _, p := range df.ExcludePeers {
+			if id, _ := folderPeerInfo(p); id != 0 {
+				delete(out, id)
+			}
+		}
+	}
+	return out
+}
+
 // fetchFolders 拉取聊天文件夹。
 func fetchFolders(ctx context.Context, api *tg.Client) ([]dto.Folder, error) {
 	res, err := api.MessagesGetDialogFilters(ctx)
@@ -330,7 +428,22 @@ func fetchFolders(ctx context.Context, api *tg.Client) ([]dto.Folder, error) {
 		if emoji, ok := df.GetEmoticon(); ok {
 			item.Emoji = emoji
 		}
-		item.ChatCount = len(df.PinnedPeers) + len(df.IncludePeers)
+		seen := make(map[int64]bool)
+		for pinned, peers := range map[bool][]tg.InputPeerClass{true: df.PinnedPeers, false: df.IncludePeers} {
+			for _, p := range peers {
+				id, typ := folderPeerInfo(p)
+				if id == 0 || seen[id] {
+					continue
+				}
+				seen[id] = true
+				item.Peers = append(item.Peers, dto.FolderPeer{ID: id, Type: typ, Pinned: pinned})
+			}
+		}
+		for _, p := range df.ExcludePeers {
+			id, _ := folderPeerInfo(p)
+			delete(seen, id)
+		}
+		item.ChatCount = len(seen)
 		out = append(out, item)
 	}
 	return out, nil

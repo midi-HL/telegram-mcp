@@ -22,6 +22,10 @@ type WakeInput struct {
 	WebhookURL   string `json:"webhook_url,omitempty"`
 	WebhookToken string `json:"webhook_token,omitempty"`
 	Prompt       string `json:"prompt,omitempty"`
+	// 过滤条件，用于 config action。
+	ChatIDs   []int64 `json:"chat_ids,omitempty"`
+	FolderIDs []int   `json:"folder_ids,omitempty"`
+	SenderIDs []int64 `json:"sender_ids,omitempty"`
 	// Text 用于 test action。
 	Text string `json:"text,omitempty"`
 }
@@ -99,6 +103,15 @@ func handleWake(ctx context.Context, deps *Deps, in WakeInput) (*mcp.CallToolRes
 		}
 		if in.Prompt != "" {
 			cfg.Prompt = in.Prompt
+		}
+		if in.ChatIDs != nil {
+			cfg.ChatIDs = append([]int64(nil), in.ChatIDs...)
+		}
+		if in.FolderIDs != nil {
+			cfg.FolderIDs = append([]int(nil), in.FolderIDs...)
+		}
+		if in.SenderIDs != nil {
+			cfg.SenderIDs = append([]int64(nil), in.SenderIDs...)
 		}
 		deps.Wake.UpdateConfig(cfg)
 		if deps.Config != nil {

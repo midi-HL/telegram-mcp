@@ -113,12 +113,21 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		})
 	}
 
+	// 分类过滤实时展开：每次事件按账号当前已就绪的客户端读取 dialog filters。
+	folderLookup := wake.FolderLookup(func(fctx context.Context, account string, folderIDs []int) map[int64]bool {
+		acc, ok := pool.Get(account)
+		if !ok || acc == nil || acc.API() == nil {
+			return map[int64]bool{}
+		}
+		return tgmcp.FolderChatIDs(fctx, acc.API(), folderIDs)
+	})
 	wakeEngine := wake.New(wake.Options{
-		Config:    cfg.Wake,
-		Logger:    a.Logger,
-		Admins:    adminChecker,
-		Server:    tgmcp.CurrentServer,
-		Transport: map[bool]string{true: "http", false: "stdio"}[*useHTTP],
+		Config:       cfg.Wake,
+		Logger:       a.Logger,
+		Admins:       adminChecker,
+		Server:       tgmcp.CurrentServer,
+		FolderLookup: folderLookup,
+		Transport:    map[bool]string{true: "http", false: "stdio"}[*useHTTP],
 	})
 
 	deps := &tgmcp.Deps{

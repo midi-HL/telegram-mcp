@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,16 +22,19 @@ func (a *App) runWake(ctx context.Context, args []string) error {
 	fs.SetOutput(a.Stderr)
 	a.commonFlags(fs)
 	var (
-		mode     = fs.String("mode", "", "notify / sampling / webhook / all")
-		out      = fs.Bool("include-out", false, "自己发的消息也唤醒（配合 config）")
-		noText   = fs.Bool("no-text", false, "通知里不附带消息正文")
-		debounce = fs.Int("debounce", -1, "同一会话防抖秒数（0 关闭）")
-		maxText  = fs.Int("max-text", 0, "正文最大字符数")
-		webhook  = fs.String("webhook", "", "Webhook URL")
-		token    = fs.String("webhook-token", "", "Webhook Bearer token")
-		prompt   = fs.String("prompt", "", "给 Agent 的提示语")
-		text     = fs.String("text", "", "test 用的消息正文")
-		webuiURL = fs.String("webui", "", "已运行服务的 Web UI 地址（如 http://127.0.0.1:8080），用于在线 test/status")
+		mode      = fs.String("mode", "", "notify / sampling / webhook / all")
+		out       = fs.Bool("include-out", false, "自己发的消息也唤醒（配合 config）")
+		noText    = fs.Bool("no-text", false, "通知里不附带消息正文")
+		debounce  = fs.Int("debounce", -1, "同一会话防抖秒数（0 关闭）")
+		maxText   = fs.Int("max-text", 0, "正文最大字符数")
+		webhook   = fs.String("webhook", "", "Webhook URL")
+		token     = fs.String("webhook-token", "", "Webhook Bearer token")
+		prompt    = fs.String("prompt", "", "给 Agent 的提示语")
+		text      = fs.String("text", "", "test 用的消息正文")
+		webuiURL  = fs.String("webui", "", "已运行服务的 Web UI 地址（如 http://127.0.0.1:8080），用于在线 test/status")
+		chatIDs   = fs.String("chat-ids", "", "只唤醒这些 chat_id，逗号分隔")
+		folderIDs = fs.String("folder-ids", "", "只唤醒这些 Telegram 分类 ID，逗号分隔")
+		senderIDs = fs.String("sender-ids", "", "只唤醒这些 sender_id，逗号分隔")
 	)
 	// Go 的 flag 包遇到第一个位置参数就停止解析，因此
 	// 「wake test --webui http://...」这种自然写法会丢掉后面的 flag。
@@ -106,6 +110,21 @@ func (a *App) runWake(ctx context.Context, args []string) error {
 		}
 		if *prompt != "" {
 			cfg.Wake.Prompt = *prompt
+		}
+		if ids, err := parseInt64List(*chatIDs); err != nil {
+			return fmt.Errorf("--chat-ids: %w", err)
+		} else if ids != nil {
+			cfg.Wake.ChatIDs = ids
+		}
+		if ids, err := parseIntList(*folderIDs); err != nil {
+			return fmt.Errorf("--folder-ids: %w", err)
+		} else if ids != nil {
+			cfg.Wake.FolderIDs = ids
+		}
+		if ids, err := parseInt64List(*senderIDs); err != nil {
+			return fmt.Errorf("--sender-ids: %w", err)
+		} else if ids != nil {
+			cfg.Wake.SenderIDs = ids
 		}
 		config.NormalizeWake(&cfg.Wake)
 		if err := cfg.Save(); err != nil {
@@ -265,4 +284,54 @@ func validateWebhookURL(raw string) error {
 
 func getenv(key string) string {
 	return os.Getenv(key)
+}
+
+// parseInt64List 解析逗号分隔的 int64 列表；空字符串返回 nil（不修改配置）。
+func parseInt64List(raw string) ([]int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if raw == "clear" || raw == "none" {
+		return []int64{}, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int64, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		v, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("无效数字 %q", p)
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// parseIntList 解析逗号分隔的 int 列表；空字符串返回 nil（不修改配置）。
+func parseIntList(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if raw == "clear" || raw == "none" {
+		return []int{}, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		v, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("无效数字 %q", p)
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }

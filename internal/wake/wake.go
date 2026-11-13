@@ -59,14 +59,19 @@ type Classifier interface {
 // ServerProvider 返回当前 MCP server（stdio 或 HTTP 共用同一个 server）。
 type ServerProvider func() *mcp.Server
 
+// FolderLookup 动态展开指定 Telegram 分类里的会话 ID。
+// 实现方应每次实时查询，保证分类新增群自动纳入过滤。
+type FolderLookup func(ctx context.Context, account string, folderIDs []int) map[int64]bool
+
 // Engine 是唤醒引擎。
 type Engine struct {
-	cfg       config.Wake
-	logger    *zap.Logger
-	admins    Classifier
-	server    ServerProvider
-	http      *http.Client
-	transport string
+	cfg          config.Wake
+	logger       *zap.Logger
+	admins       Classifier
+	server       ServerProvider
+	folderLookup FolderLookup
+	http         *http.Client
+	transport    string
 
 	mu        sync.RWMutex
 	seq       uint64
@@ -78,12 +83,13 @@ type Engine struct {
 
 // Options 是引擎构造参数。
 type Options struct {
-	Config    config.Wake
-	Logger    *zap.Logger
-	Admins    Classifier
-	Server    ServerProvider
-	Transport string
-	HTTP      *http.Client
+	Config       config.Wake
+	Logger       *zap.Logger
+	Admins       Classifier
+	Server       ServerProvider
+	FolderLookup FolderLookup
+	Transport    string
+	HTTP         *http.Client
 }
 
 // New 创建唤醒引擎。
@@ -99,14 +105,15 @@ func New(opts Options) *Engine {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 	return &Engine{
-		cfg:       cfg,
-		logger:    logger,
-		admins:    opts.Admins,
-		server:    opts.Server,
-		http:      httpClient,
-		transport: opts.Transport,
-		pending:   make([]Notification, 0, 16),
-		lastSent:  make(map[int64]time.Time),
+		cfg:          cfg,
+		logger:       logger,
+		admins:       opts.Admins,
+		server:       opts.Server,
+		folderLookup: opts.FolderLookup,
+		http:         httpClient,
+		transport:    opts.Transport,
+		pending:      make([]Notification, 0, 16),
+		lastSent:     make(map[int64]time.Time),
 	}
 }
 
@@ -151,6 +158,9 @@ func (e *Engine) Stats() map[string]any {
 		"dropped":          e.dropped,
 		"include_out":      e.cfg.IncludeOut,
 		"include_text":     e.cfg.IncludeText,
+		"chat_ids":         e.cfg.ChatIDs,
+		"folder_ids":       e.cfg.FolderIDs,
+		"sender_ids":       e.cfg.SenderIDs,
 		"debounce_seconds": e.cfg.DebounceSeconds,
 		"transport":        e.transport,
 	}
@@ -165,6 +175,9 @@ func (e *Engine) Handle(ctx context.Context, ev Event) {
 		return
 	}
 	if ev.Out && !cfg.IncludeOut {
+		return
+	}
+	if !e.matchFilters(ctx, ev, cfg) {
 		return
 	}
 	if !e.allowDebounce(ev.ChatID, cfg.DebounceSeconds) {
@@ -343,6 +356,33 @@ func (e *Engine) format(ev Event, prompt string, cfg config.Wake, trusted bool) 
 	return b.String()
 }
 
+// matchFilters 判断事件是否命中唤醒范围。
+// ChatIDs / FolderIDs 是「任一命中」；SenderIDs 非空时作为额外 AND 条件。
+func (e *Engine) matchFilters(ctx context.Context, ev Event, cfg config.Wake) bool {
+	if len(cfg.SenderIDs) > 0 && !containsInt64(cfg.SenderIDs, ev.SenderID) {
+		return false
+	}
+	if len(cfg.ChatIDs) == 0 && len(cfg.FolderIDs) == 0 {
+		return true
+	}
+	if containsInt64(cfg.ChatIDs, ev.ChatID) {
+		return true
+	}
+	if len(cfg.FolderIDs) == 0 || e.folderLookup == nil {
+		return false
+	}
+	return e.folderLookup(ctx, ev.Account, cfg.FolderIDs)[ev.ChatID]
+}
+
+func containsInt64(list []int64, v int64) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Engine) isTrusted(ctx context.Context, ev Event) bool {
 	if ev.Out {
 		return true
@@ -407,20 +447,23 @@ func (e *Engine) Ack() int {
 }
 
 // Test 投递一条合成事件，用于 CLI / Web UI 验证唤醒链路。
-// 测试不受总开关与防抖限制：否则「关闭时点测试」会毫无反馈，
+// 测试不受总开关、过滤条件与防抖限制：否则「关闭/未命中过滤时点测试」会毫无反馈，
 // 刚测过一次再点也会因防抖被静默丢弃。
 func (e *Engine) Test(ctx context.Context, text string) Notification {
 	if text == "" {
 		text = "这是一条 Agent 唤醒链路测试消息"
 	}
 	e.mu.Lock()
-	wasEnabled, wasDebounce := e.cfg.Enabled, e.cfg.DebounceSeconds
+	enabled, debounce := e.cfg.Enabled, e.cfg.DebounceSeconds
+	chatIDs, folderIDs, senderIDs := e.cfg.ChatIDs, e.cfg.FolderIDs, e.cfg.SenderIDs
 	e.cfg.Enabled, e.cfg.DebounceSeconds = true, 0
+	e.cfg.ChatIDs, e.cfg.FolderIDs, e.cfg.SenderIDs = nil, nil, nil
 	e.lastSent = make(map[int64]time.Time)
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
-		e.cfg.Enabled, e.cfg.DebounceSeconds = wasEnabled, wasDebounce
+		e.cfg.Enabled, e.cfg.DebounceSeconds = enabled, debounce
+		e.cfg.ChatIDs, e.cfg.FolderIDs, e.cfg.SenderIDs = chatIDs, folderIDs, senderIDs
 		e.mu.Unlock()
 	}()
 

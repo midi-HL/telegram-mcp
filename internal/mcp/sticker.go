@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/gotd/td/tg"
@@ -14,7 +15,7 @@ type StickerInput struct {
 	// Action: search_sets / set_info / send / react / custom_emoji
 	Action  string `json:"action" jsonschema:"search_sets|set_info|send|react|custom_emoji"`
 	Query   string `json:"query,omitempty" jsonschema:"search query or short name"`
-	SetID   int64  `json:"set_id,omitempty" jsonschema:"sticker set id"`
+	SetID   string `json:"set_id,omitempty" jsonschema:"sticker set id as string to preserve int64 precision"`
 	Chat    string `json:"chat,omitempty" jsonschema:"chat id"`
 	Sticker string `json:"sticker,omitempty" jsonschema:"sticker emoji or doc id"`
 	MsgID   int    `json:"msg_id,omitempty" jsonschema:"message id (for react)"`
@@ -24,8 +25,9 @@ type StickerInput struct {
 }
 
 // StickerSet 是贴纸包摘要。
+// ID 用字符串传输，避免 MCP/JSON 通道用 float64 表示大整数导致末尾精度丢失。
 type StickerSet struct {
-	ID        int64  `json:"id"`
+	ID        string `json:"id"`
 	Title     string `json:"title"`
 	ShortName string `json:"short_name"`
 	Count     int    `json:"count"`
@@ -37,32 +39,32 @@ type StickerSet struct {
 
 // Sticker 是单个贴纸。
 type Sticker struct {
-	ID        int64  `json:"id"`
-	Emoji     string `json:"emoji,omitempty"`
-	MimeType  string `json:"mime,omitempty"`
-	Size      int64  `json:"size,omitempty"`
-	Width     int    `json:"w,omitempty"`
-	Height    int    `json:"h,omitempty"`
-	Animated  bool   `json:"animated,omitempty"`
-	Video     bool   `json:"video,omitempty"`
+	ID       string `json:"id"`
+	Emoji    string `json:"emoji,omitempty"`
+	MimeType string `json:"mime,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Width    int    `json:"w,omitempty"`
+	Height   int    `json:"h,omitempty"`
+	Animated bool   `json:"animated,omitempty"`
+	Video    bool   `json:"video,omitempty"`
 }
 
 // StickerOutput 是 sticker 工具的输出。
 type StickerOutput struct {
-	Action  string       `json:"action"`
-	Sets    []StickerSet `json:"sets,omitempty"`
-	Set     *StickerSet  `json:"set,omitempty"`
-	Stickers []Sticker   `json:"stickers,omitempty"`
-	Count   int          `json:"count,omitempty"`
-	MsgID   int          `json:"msg_id,omitempty"`
-	Note    string       `json:"note,omitempty"`
+	Action   string       `json:"action"`
+	Sets     []StickerSet `json:"sets,omitempty"`
+	Set      *StickerSet  `json:"set,omitempty"`
+	Stickers []Sticker    `json:"stickers,omitempty"`
+	Count    int          `json:"count,omitempty"`
+	MsgID    int          `json:"msg_id,omitempty"`
+	Note     string       `json:"note,omitempty"`
 }
 
 // registerStickerTools 注册 sticker 工具。
 func registerStickerTools(s *mcp.Server, deps *Deps) {
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "sticker",
-		Description: "贴纸与表情。action: search_sets 搜索贴纸包 / set_info 包详情 / send 发贴纸 / react 加表情反应 / custom_emoji 自定义 emoji",
+		Name:        "sticker",
+		Description: "贴纸与表情。action: search_sets 搜索贴纸包 / set_info 包详情 / send 发贴纸 / react 加表情反应 / list_installed 列已安装包（别名 custom_emoji）",
 		Annotations: &mcp.ToolAnnotations{Title: "贴纸", ReadOnlyHint: false},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in StickerInput) (*mcp.CallToolResult, StickerOutput, error) {
 		return handleSticker(ctx, deps, in)
@@ -81,7 +83,7 @@ func handleSticker(ctx context.Context, deps *Deps, in StickerInput) (*mcp.CallT
 		return handleStickerSend(ctx, deps, in, out)
 	case "react":
 		return handleStickerReact(ctx, deps, in, out)
-	case "custom_emoji":
+	case "custom_emoji", "list_installed":
 		return handleCustomEmoji(ctx, deps, in, out)
 	default:
 		out.Note = fmt.Sprintf("未知 action %q", in.Action)
@@ -97,8 +99,14 @@ func handleStickerSearch(ctx context.Context, deps *Deps, in StickerInput, out S
 		return nil, out, nil
 	}
 
+	q := strings.TrimSpace(in.Query)
+	if q == "" {
+		out.Note = "search_sets 需要 query"
+		return nil, out, nil
+	}
 	res, err := acc.API().MessagesSearchStickerSets(ctx, &tg.MessagesSearchStickerSetsRequest{
-		Q: in.Query,
+		Q:    q,
+		Hash: 0, // 不带缓存 hash，避免服务端直接返回 NotModified
 	})
 	if err != nil {
 		out.Note = fmt.Sprintf("搜索失败: %v", err)
@@ -110,7 +118,10 @@ func handleStickerSearch(ctx context.Context, deps *Deps, in StickerInput, out S
 	case *tg.MessagesFoundStickerSets:
 		found = v.Sets
 	case *tg.MessagesFoundStickerSetsNotModified:
-		out.Note = "贴纸包列表未变更（用 set_info 查详情）"
+		out.Note = "Telegram 返回「列表未变更」；请换个关键词，或用 list_installed / set_info 查询已安装包"
+		return nil, out, nil
+	default:
+		out.Note = fmt.Sprintf("Telegram 未返回贴纸包列表（%T）；该搜索词可能没有公开结果", res)
 		return nil, out, nil
 	}
 	limit := in.Limit
@@ -138,21 +149,18 @@ func handleStickerSetInfo(ctx context.Context, deps *Deps, in StickerInput, out 
 		return nil, out, nil
 	}
 
-	inputSet := &tg.InputStickerSetID{ID: in.SetID}
-	if in.SetID == 0 && in.Query != "" {
-		inputSet = nil
-		// 用 short name 查
-		res, err := acc.API().MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{
-			Stickerset: &tg.InputStickerSetShortName{ShortName: in.Query},
-		})
-		if err != nil {
-			out.Note = fmt.Sprintf("获取贴纸包失败: %v", err)
-			return nil, out, nil
-		}
-		projectStickerSetFull(res, out)
+	setID, err := parseSetID(in.SetID)
+	if err != nil {
+		out.Note = err.Error()
 		return nil, out, nil
 	}
-
+	var inputSet tg.InputStickerSetClass = &tg.InputStickerSetID{ID: setID}
+	if setID == 0 && in.Query != "" {
+		inputSet = &tg.InputStickerSetShortName{ShortName: in.Query}
+	} else if setID == 0 {
+		out.Note = "set_info 需要 set_id 或 query（short name）"
+		return nil, out, nil
+	}
 	res, err := acc.API().MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{
 		Stickerset: inputSet,
 	})
@@ -160,16 +168,16 @@ func handleStickerSetInfo(ctx context.Context, deps *Deps, in StickerInput, out 
 		out.Note = fmt.Sprintf("获取贴纸包失败: %v", err)
 		return nil, out, nil
 	}
-	projectStickerSetFull(res, out)
+	out = projectStickerSetFull(res, out)
 	return nil, out, nil
 }
 
-// projectStickerSetFull 填充贴纸包详情。
-func projectStickerSetFull(res tg.MessagesStickerSetClass, out StickerOutput) {
+// projectStickerSetFull 填充贴纸包详情并返回结果，避免按值传参丢失字段。
+func projectStickerSetFull(res tg.MessagesStickerSetClass, out StickerOutput) StickerOutput {
 	ms, ok := res.(*tg.MessagesStickerSet)
 	if !ok {
 		out.Note = "贴纸包数据不可用"
-		return
+		return out
 	}
 	set := projectStickerSet(ms.Set)
 	out.Set = &set
@@ -187,6 +195,7 @@ func projectStickerSetFull(res tg.MessagesStickerSetClass, out StickerOutput) {
 	}
 	out.Count = len(out.Stickers)
 	out.Note = fmt.Sprintf("贴纸包「%s」共 %d 个贴纸", set.Title, set.Count)
+	return out
 }
 
 // handleStickerSend 发送贴纸。
@@ -206,13 +215,21 @@ func handleStickerSend(ctx context.Context, deps *Deps, in StickerInput, out Sti
 		return nil, out, nil
 	}
 
-	// 从贴纸包找匹配的贴纸
-	if in.SetID == 0 {
-		out.Note = "send 需要 set_id（先用 search_sets 找贴纸包）"
+	// 从贴纸包找匹配的贴纸；set_id 用字符串避免 int64 JSON 精度丢失。
+	setID, err := parseSetID(in.SetID)
+	if err != nil {
+		out.Note = err.Error()
+		return nil, out, nil
+	}
+	var inputSet tg.InputStickerSetClass = &tg.InputStickerSetID{ID: setID}
+	if setID == 0 && in.Query != "" {
+		inputSet = &tg.InputStickerSetShortName{ShortName: in.Query}
+	} else if setID == 0 {
+		out.Note = "send 需要 set_id 或 query（short name）"
 		return nil, out, nil
 	}
 	res, err := acc.API().MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{
-		Stickerset: &tg.InputStickerSetID{ID: in.SetID},
+		Stickerset: inputSet,
 	})
 	if err != nil {
 		out.Note = fmt.Sprintf("获取贴纸包失败: %v", err)
@@ -340,7 +357,7 @@ func handleCustomEmoji(ctx context.Context, deps *Deps, in StickerInput, out Sti
 // projectStickerSet 把 StickerSet 投影。
 func projectStickerSet(s tg.StickerSet) StickerSet {
 	return StickerSet{
-		ID:        s.ID,
+		ID:        strconv.FormatInt(s.ID, 10),
 		Title:     s.Title,
 		ShortName: s.ShortName,
 		Count:     s.Count,
@@ -354,7 +371,7 @@ func projectStickerSet(s tg.StickerSet) StickerSet {
 // projectSticker 把 Document 投影成 Sticker。
 func projectSticker(doc *tg.Document) Sticker {
 	st := Sticker{
-		ID:       doc.ID,
+		ID:       strconv.FormatInt(doc.ID, 10),
 		MimeType: doc.MimeType,
 		Size:     doc.Size,
 	}
@@ -374,4 +391,17 @@ func projectSticker(doc *tg.Document) Sticker {
 		st.Video = true
 	}
 	return st
+}
+
+// parseSetID 解析字符串化的大整数 ID；空字符串返回 0。
+func parseSetID(raw string) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("set_id 必须是正整数字符串（保留 int64 精度）")
+	}
+	return id, nil
 }

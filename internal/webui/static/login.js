@@ -165,7 +165,9 @@
       }
       if (d.qr_url) {
         renderQR(d.qr_url);
-        document.getElementById('qr-hint').textContent = '等待扫码…';
+        const left = d.qr_expires ? Math.max(0, d.qr_expires - Math.floor(Date.now() / 1000)) : 0;
+        document.getElementById('qr-hint').textContent =
+          left > 0 ? '等待扫码… 二维码 ' + left + ' 秒后自动刷新，请用手机 Telegram 立即扫码' : '等待扫码… 二维码即将刷新';
       }
       if (d.state === 'success') {
         document.getElementById('qr-hint').textContent =

@@ -87,6 +87,12 @@ type Wake struct {
 	WebhookToken string `json:"webhook_token,omitempty"`
 	// 交付给 Agent 的提示语模板，留空使用默认。
 	Prompt string `json:"prompt,omitempty"`
+	// ChatIDs 是会话白名单；非空时只唤醒这些 chat_id。
+	ChatIDs []int64 `json:"chat_ids,omitempty"`
+	// FolderIDs 是 Telegram 分类 ID 白名单；成员按 PinnedPeers + IncludePeers 动态展开。
+	FolderIDs []int `json:"folder_ids,omitempty"`
+	// SenderIDs 是发送者白名单；非空时额外要求发送者命中。
+	SenderIDs []int64 `json:"sender_ids,omitempty"`
 }
 
 // DefaultWake 返回唤醒配置的默认值。

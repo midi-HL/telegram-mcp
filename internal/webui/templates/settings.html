@@ -39,6 +39,9 @@
     <label class="check-row"><input type="checkbox" id="wake-include-out"> 自己发出的消息也唤醒</label>
     <label>会话防抖间隔（秒）<input type="number" id="wake-debounce" min="0" max="3600" value="2"></label>
     <label>正文最大字符数<input type="number" id="wake-max-text" min="20" max="4000" value="280"></label>
+    <label>只唤醒这些 chat_id（逗号分隔，留空=不限）<input type="text" id="wake-chat-ids" placeholder="-1001234567890,123456"></label>
+    <label>只唤醒这些分类 ID（逗号分隔，留空=不限；用 chat folders 查 ID）<input type="text" id="wake-folder-ids" placeholder="2,3"></label>
+    <label>只唤醒这些 sender_id（逗号分隔，留空=不限）<input type="text" id="wake-sender-ids" placeholder="123456,789012"></label>
     <label>Webhook URL（webhook / all 模式必填）<input type="url" id="wake-webhook-url" placeholder="http://127.0.0.1:9000/telegram"></label>
     <label>Webhook Bearer Token（可选）<input type="password" id="wake-webhook-token" autocomplete="off"></label>
     <label>给 Agent 的提示语（留空用默认）<textarea id="wake-prompt" rows="2" placeholder="有新消息，请用 message history 查看并决定是否回复"></textarea></label>

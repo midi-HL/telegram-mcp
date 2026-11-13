@@ -14,16 +14,17 @@ import (
 // ChatInput 是 chat 工具的输入。
 type ChatInput struct {
 	// Action: list / info / unread / mark_read / folders
-	Action  string `json:"action" jsonschema:"list|info|unread|mark_read|folders"`
-	Chat    string `json:"chat,omitempty" jsonschema:"chat id or @username"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"default 50, max 200"`
+	Action  string   `json:"action" jsonschema:"list|info|unread|mark_read|folders"`
+	Chat    string   `json:"chat,omitempty" jsonschema:"chat id or @username"`
+	Limit   int      `json:"limit,omitempty" jsonschema:"default 50, max 200"`
+	Offset  int      `json:"offset,omitempty" jsonschema:"pagination offset for list"`
 	Expand  []string `json:"expand,omitempty" jsonschema:"full|members|permissions"`
-	Account string `json:"account,omitempty" jsonschema:"account name"`
+	Account string   `json:"account,omitempty" jsonschema:"account name"`
 }
 
 // ChatOutput 是 chat 工具的输出。
 type ChatOutput struct {
-	Action  string `json:"action"`
+	Action  string          `json:"action"`
 	Chats   []dto.ChatBrief `json:"chats,omitempty"`
 	Chat    *dto.ChatFull   `json:"chat,omitempty"`
 	Folders []dto.Folder    `json:"folders,omitempty"`
@@ -34,15 +35,15 @@ type ChatOutput struct {
 
 // UnreadSummary 是未读概览。
 type UnreadSummary struct {
-	TotalChats    int            `json:"total_chats"`
-	TotalUnread   int            `json:"total_unread"`
-	TopUnread     []dto.ChatBrief `json:"top,omitempty"`
+	TotalChats  int             `json:"total_chats"`
+	TotalUnread int             `json:"total_unread"`
+	TopUnread   []dto.ChatBrief `json:"top,omitempty"`
 }
 
 // registerChatTools 注册 chat 工具。
 func registerChatTools(s *mcp.Server, deps *Deps) {
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "chat",
+		Name:        "chat",
 		Description: "会话管理。action: list 列表 / info 详情 / unread 未读概览 / mark_read 标记已读 / folders 文件夹",
 		Annotations: &mcp.ToolAnnotations{Title: "会话", ReadOnlyHint: false},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in ChatInput) (*mcp.CallToolResult, ChatOutput, error) {
@@ -90,8 +91,8 @@ func handleChatList(ctx context.Context, deps *Deps, in ChatInput, out ChatOutpu
 		limit = 200
 	}
 
-	// 从 Telegram 拉取会话列表
-	dialogs, err := fetchDialogs(ctx, acc.API(), limit)
+	// 从 Telegram 拉取会话列表；limit 是请求目标，内部自动翻页直到取够/取完。
+	dialogs, err := fetchDialogs(ctx, acc.API(), limit, in.Offset)
 	if err != nil {
 		out.Message = fmt.Sprintf("拉取会话失败: %v", err)
 		return nil, out, nil
@@ -163,7 +164,7 @@ func handleChatUnread(ctx context.Context, deps *Deps, in ChatInput, out ChatOut
 	}
 
 	// 拉取足够多的会话以统计未读
-	dialogs, err := fetchDialogs(ctx, acc.API(), 100)
+	dialogs, err := fetchDialogs(ctx, acc.API(), 100, 0)
 	if err != nil {
 		out.Message = fmt.Sprintf("拉取会话失败: %v", err)
 		return nil, out, nil

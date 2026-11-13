@@ -99,6 +99,15 @@
       output.hidden = false;
     }
 
+    function parseIdList(selector, asInt) {
+      const raw = document.querySelector(selector).value.trim();
+      if (!raw) return [];
+      return raw.split(',').map(function(s) {
+        const n = Number(s.trim());
+        return asInt ? Math.trunc(n) : n;
+      }).filter(function(n) { return Number.isFinite(n) && n !== 0; });
+    }
+
     function readConfig() {
       return {
         enabled: document.getElementById('wake-enabled').checked,
@@ -107,6 +116,9 @@
         include_text: document.getElementById('wake-include-text').checked,
         max_text_runes: parseInt(document.getElementById('wake-max-text').value, 10) || 280,
         debounce_seconds: parseInt(document.getElementById('wake-debounce').value, 10) || 0,
+        chat_ids: parseIdList('#wake-chat-ids', false),
+        folder_ids: parseIdList('#wake-folder-ids', true),
+        sender_ids: parseIdList('#wake-sender-ids', false),
         webhook_url: document.getElementById('wake-webhook-url').value.trim(),
         webhook_token: document.getElementById('wake-webhook-token').value.trim(),
         prompt: document.getElementById('wake-prompt').value.trim()
@@ -120,6 +132,9 @@
       document.getElementById('wake-include-text').checked = c.include_text !== false;
       document.getElementById('wake-max-text').value = c.max_text_runes || 280;
       document.getElementById('wake-debounce').value = c.debounce_seconds || 0;
+      document.getElementById('wake-chat-ids').value = (c.chat_ids || []).join(',');
+      document.getElementById('wake-folder-ids').value = (c.folder_ids || []).join(',');
+      document.getElementById('wake-sender-ids').value = (c.sender_ids || []).join(',');
       document.getElementById('wake-webhook-url').value = c.webhook_url || '';
       document.getElementById('wake-webhook-token').value = c.webhook_token || '';
       document.getElementById('wake-prompt').value = c.prompt || '';

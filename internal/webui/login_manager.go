@@ -327,6 +327,16 @@ type webPrompter struct {
 
 // Ask 等待 Web 端提交。
 func (p *webPrompter) Ask(ctx context.Context, prompt string) (string, error) {
+	// 两步验证阶段必须把状态切到 waiting_password，否则前端会一直显示 waiting_code。
+	if containsAny(prompt, "两步验证", "密码", "password") {
+		p.sess.setState(StateWaitingPassword)
+		select {
+		case v := <-p.sess.passwordCh:
+			return v, nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 	// 根据 prompt 内容判断要等哪个通道
 	if containsAny(prompt, "验证码", "code") {
 		select {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -27,7 +26,7 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 
 	var (
 		accountName = fs.String("account", "", "默认账号名（留空用配置里的 default_account）")
-		useHTTP     = fs.Bool("http", false, "使用 Streamable HTTP 传输（阶段 3 实现）")
+		useHTTP     = fs.Bool("http", false, "使用 Streamable HTTP 传输")
 		port        = fs.Int("port", 0, "HTTP 端口（--http 时生效）")
 		httpToken   = fs.String("token", "", "HTTP Bearer token（留空则不鉴权，仅限本机）")
 		readyWait   = fs.Duration("ready-timeout", 60*time.Second, "等待账号就绪的超时时间")
@@ -58,8 +57,6 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 	}
 	config.NormalizeWake(&cfg.Wake)
 
-	// ★ 不因"没有账号"而拒绝启动：Web UI 必须先起来，让用户在浏览器里
-	//   填 API 凭据 + 扫码/手机号登录。账号就绪与否不影响 Web UI。
 	defaultAccount := *accountName
 	if defaultAccount == "" {
 		defaultAccount = cfg.DefaultAccount
@@ -73,7 +70,6 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 	for _, ac := range cfg.Accounts {
 		acc, err := tgclient.NewAccount(ac)
 		if err != nil {
-			// 单个账号配置错误不应阻止整个服务启动
 			a.Logger.Warn("账号初始化失败，已跳过",
 				zap.String("account", ac.Name), zap.Error(err))
 			continue
@@ -85,14 +81,10 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 			zap.String("webui", fmt.Sprintf("http://%s:%d/ui", cfg.WebUI.Host, cfg.WebUI.Port)))
 	}
 
-	// 自动回复引擎（延迟到 store 打开后初始化）
-	var autoReplyEngine *autoreply.Engine
-
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// ★ 先打开缓存 + 启动 Web UI，再连账号。
-	//   这样即使账号未登录/连接失败，浏览器也能访问 UI 完成登录。
+	// 先打开缓存 + 启动 Web UI，再连账号。
 	store, err := cache.Open(cfg.DataDir)
 	if err != nil {
 		a.Logger.Warn("缓存不可用，将直接走 Telegram API", zap.Error(err))
@@ -101,7 +93,6 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		a.Logger.Info("缓存已打开", zap.String("path", store.Path()))
 	}
 
-	// 信任体系
 	var guard *trust.Guard
 	var adminChecker interface {
 		IsAdmin(ctx context.Context, userID int64) (bool, error)
@@ -111,7 +102,7 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		adminChecker = store
 	}
 
-	// 自动回复引擎
+	var autoReplyEngine *autoreply.Engine
 	if store != nil {
 		rs := autoreply.NewRuleStore(store)
 		autoReplyEngine = autoreply.New(autoreply.Config{
@@ -122,7 +113,6 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		})
 	}
 
-	// 新消息唤醒引擎：在 MCP server 创建前注入 provider，HTTP/stdio 都能主动通知。
 	wakeEngine := wake.New(wake.Options{
 		Config:    cfg.Wake,
 		Logger:    a.Logger,
@@ -142,10 +132,94 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		Wake:           wakeEngine,
 	}
 
-	// ★ Web UI 立即启动（独立端口），不等待任何账号
+	// 统一账号激活逻辑：启动时已有账号与 Web 登录新增账号共用。
+	activate := tgclient.AccountActivator(func(actx context.Context, acc *tgclient.Account) error {
+		status, err := tgclient.CheckStatus(actx, acc)
+		if err != nil {
+			return err
+		}
+		if !status.Authorized {
+			return fmt.Errorf("账号 %q 未授权", acc.Name)
+		}
+
+		var handlers []tgclient.MessageHandler
+		if autoReplyEngine != nil {
+			handlers = append(handlers, func(hctx context.Context, ev tgclient.MessageEvent) {
+				autoReplyEngine.Handle(hctx, autoreply.Event{
+					ChatID:   ev.ChatID,
+					MsgID:    ev.MsgID,
+					Sender:   ev.Sender,
+					SenderID: ev.SenderID,
+					Text:     ev.Text,
+					IsOut:    ev.Out,
+				})
+			})
+		}
+		handlers = append(handlers, func(hctx context.Context, ev tgclient.MessageEvent) {
+			wakeEngine.Handle(hctx, wake.Event{
+				Account:  acc.Name,
+				ChatID:   ev.ChatID,
+				MsgID:    ev.MsgID,
+				SenderID: ev.SenderID,
+				Sender:   ev.Sender,
+				Text:     ev.Text,
+				Out:      ev.Out,
+			})
+		})
+		// gotd 的 OnNewMessage 是覆盖式注册，自动回复与唤醒必须一次注册。
+		tgclient.RegisterMessageHandlers(acc, a.Logger, handlers...)
+
+		// 替换同名账号后旧 resolver 持有旧 tg.Client，必须失效。
+		deps.InvalidateResolver(acc.Name)
+		// 零账号启动 / 默认账号不存在时，把第一个就绪账号设为默认。
+		if _, ok := pool.Get(deps.DefaultAccount); !ok || deps.DefaultAccount == "" {
+			deps.DefaultAccount = acc.Name
+			cfg.DefaultAccount = acc.Name
+		}
+
+		a.Logger.Info("账号已就绪，可立即使用",
+			zap.String("account", acc.Name),
+			zap.Int64("user_id", status.UserID),
+			zap.String("username", status.Username))
+		return nil
+	})
+
+	runtime := tgclient.NewRuntime(runCtx, pool, activate, a.Logger)
+	initial := runtime.ActivateExisting()
+
+	// Web 登录成功回调：先构造并排队常驻 Account，但延迟启动其 client.Run，
+	// 等临时登录连接关闭后再启动，避免两个连接共用同一 session 文件。
+	loginActivator := webui.LoginActivator(func(acc *tgclient.Account) error {
+		saved := cfg.Account(acc.Name)
+		if saved == nil {
+			return fmt.Errorf("账号 %q 配置不存在", acc.Name)
+		}
+		persistent, err := tgclient.NewAccount(*saved)
+		if err != nil {
+			return err
+		}
+		go func() {
+			// 临时登录 Run 返回后 session.json 已落盘；留一点时间给
+			// gotd 关闭连接/释放文件句柄，再建立服务级常驻连接。
+			select {
+			case <-time.After(200 * time.Millisecond):
+			case <-runCtx.Done():
+				return
+			}
+			ctl := runtime.Activate(persistent)
+			readyCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
+			defer cancel()
+			if err := runtime.WaitReady(readyCtx, ctl); err != nil && readyCtx.Err() == nil {
+				a.Logger.Error("新登录账号激活失败",
+					zap.String("account", acc.Name), zap.Error(err))
+			}
+		}()
+		return nil
+	})
+
+	// Web UI 立即启动，不等待任何账号。
 	if cfg.WebUI.Enabled {
-		var ui *webui.Server
-		ui, err = webui.NewWithAutoReply(cfg, store, pool, autoReplyEngine, wakeEngine, a.Logger)
+		ui, err := webui.NewWithAutoReply(cfg, store, pool, autoReplyEngine, wakeEngine, loginActivator, a.Logger)
 		if err != nil {
 			a.Logger.Error("Web UI 初始化失败", zap.Error(err))
 		} else {
@@ -159,118 +233,25 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		}
 	}
 
-	// 每个账号就绪后关闭自己的 ready channel
-	type readyState struct {
-		acc   *tgclient.Account
-		ready chan struct{}
-		err   error
-		mu    sync.Mutex
-	}
-	states := make([]*readyState, 0, pool.Len())
-	for _, name := range pool.Names() {
-		acc, _ := pool.Get(name)
-		if acc == nil {
-			continue
-		}
-		states = append(states, &readyState{acc: acc, ready: make(chan struct{})})
-	}
-
-	var wg sync.WaitGroup
-	for _, st := range states {
-		wg.Add(1)
-		go func(st *readyState) {
-			defer wg.Done()
-			waiter := tgclient.NewFloodWaiter(a.Logger)
-			err := waiter.Run(runCtx, func(ctx context.Context) error {
-				return st.acc.Client().Run(ctx, func(ctx context.Context) error {
-					// 缓存 tg.Client，供 MCP 工具层使用
-					st.acc.SetAPI(st.acc.Client().API())
-					status, err := tgclient.CheckStatus(ctx, st.acc)
-					st.mu.Lock()
-					if err != nil {
-						st.err = err
-					}
-					st.mu.Unlock()
-					// 无论成功失败都标记就绪，避免 MCP 启动被永久阻塞
-					close(st.ready)
-
-					if err != nil {
-						a.Logger.Warn("账号状态检查失败",
-							zap.String("account", st.acc.Name), zap.Error(err))
-						<-ctx.Done()
-						return nil
-					}
-					if !status.Authorized {
-						a.Logger.Warn("账号未授权，请先运行 tgmcp auth",
-							zap.String("account", st.acc.Name))
-						<-ctx.Done()
-						return nil
-					}
-					a.Logger.Info("账号已就绪",
-						zap.String("account", st.acc.Name),
-						zap.Int64("user_id", status.UserID),
-						zap.String("username", status.Username))
-					// ★ 自动回复 + Agent 唤醒共用同一个 dispatcher handler。
-					//   gotd 的 OnNewMessage 是覆盖式注册，分两次注册会让其中一个静默失效。
-					var handlers []tgclient.MessageHandler
-					if autoReplyEngine != nil {
-						handlers = append(handlers, func(hctx context.Context, ev tgclient.MessageEvent) {
-							autoReplyEngine.Handle(hctx, autoreply.Event{
-								ChatID:   ev.ChatID,
-								MsgID:    ev.MsgID,
-								Sender:   ev.Sender,
-								SenderID: ev.SenderID,
-								Text:     ev.Text,
-								IsOut:    ev.Out,
-							})
-						})
-					}
-					handlers = append(handlers, func(hctx context.Context, ev tgclient.MessageEvent) {
-						wakeEngine.Handle(hctx, wake.Event{
-							Account:  st.acc.Name,
-							ChatID:   ev.ChatID,
-							MsgID:    ev.MsgID,
-							SenderID: ev.SenderID,
-							Sender:   ev.Sender,
-							Text:     ev.Text,
-							Out:      ev.Out,
-						})
-					})
-					tgclient.RegisterMessageHandlers(st.acc, a.Logger, handlers...)
-					<-ctx.Done()
-					return nil
-				})
-			})
-			if err != nil && runCtx.Err() == nil {
-				a.Logger.Error("账号运行失败",
-					zap.String("account", st.acc.Name), zap.Error(err))
-			}
-		}(st)
-	}
-
-	// 后台等待账号就绪（不阻塞 Web UI / MCP 传输）
+	// 后台等待启动账号就绪（不阻塞 Web UI / MCP 传输）。
 	go func() {
-		if len(states) == 0 {
+		if len(initial) == 0 {
 			return
 		}
 		readyCtx, readyCancel := context.WithTimeout(runCtx, *readyWait)
 		defer readyCancel()
-		for _, st := range states {
-			select {
-			case <-st.ready:
-			case <-readyCtx.Done():
-				a.Logger.Warn("账号就绪超时（服务继续运行，可在 Web UI 中登录）",
-					zap.String("account", st.acc.Name))
-				return
+		for _, ctl := range initial {
+			if err := runtime.WaitReady(readyCtx, ctl); err != nil && readyCtx.Err() == nil {
+				a.Logger.Warn("账号就绪检查失败（服务继续运行，可在 Web UI 中登录）", zap.Error(err))
 			}
 		}
-		a.Logger.Info("全部账号已就绪")
+		a.Logger.Info("启动账号已检查完毕")
 	}()
 
 	if *useHTTP {
 		httpPort := *port
 		if httpPort == 0 {
-			httpPort = cfg.WebUI.Port + 1 // 默认用 WebUI 端口 +1
+			httpPort = cfg.WebUI.Port + 1
 		}
 		addr := fmt.Sprintf("%s:%d", cfg.WebUI.Host, httpPort)
 		a.Logger.Info("启动 MCP 服务", zap.String("transport", "http"),
@@ -280,16 +261,16 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		h := tgmcp.NewHTTPServer(deps, *httpToken)
 		err = h.RunHTTP(ctx, addr, a.Logger)
 		cancel()
-		wg.Wait()
+		runtime.Wait()
 		return err
 	}
 
 	a.Logger.Info("启动 MCP 服务", zap.String("transport", "stdio"),
-		zap.String("default_account", defaultAccount))
+		zap.String("default_account", deps.DefaultAccount))
 
 	err = tgmcp.RunStdio(ctx, deps)
 	cancel()
-	wg.Wait()
+	runtime.Wait()
 	return err
 }
 

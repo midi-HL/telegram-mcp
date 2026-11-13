@@ -79,6 +79,14 @@ func (d *Deps) Account(name string) (*tgclient.Account, string, error) {
 	return acc, name, nil
 }
 
+// InvalidateResolver 丢弃某个账号的 peer 解析缓存。
+// Web 登录替换同名 Account 后必须调用，否则 resolver 仍持有旧 tg.Client。
+func (d *Deps) InvalidateResolver(account string) {
+	d.resolverMu.Lock()
+	delete(d.resolvers, account)
+	d.resolverMu.Unlock()
+}
+
 // withAccount 是工具里获取账号的便捷封装。
 func (d *Deps) withAccount(ctx context.Context, name string) (*tgclient.Account, *tgclient.PeerResolver, string, error) {
 	acc, resolved, err := d.Account(name)

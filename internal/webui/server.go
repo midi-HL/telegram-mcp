@@ -46,11 +46,18 @@ type Server struct {
 
 // New 创建 Web UI 服务器。
 func New(cfg *config.Config, store *cache.Store, pool *tgclient.Pool, logger *zap.Logger) (*Server, error) {
-	return NewWithAutoReply(cfg, store, pool, nil, nil, logger)
+	return NewWithAutoReply(cfg, store, pool, nil, nil, nil, logger)
+}
+
+// SetLoginActivator 注入「Web 登录成功后激活常驻账号」回调。
+func (s *Server) SetLoginActivator(activate LoginActivator) {
+	if s.loginMgr != nil {
+		s.loginMgr.activate = activate
+	}
 }
 
 // NewWithAutoReply 创建带自动回复 / Agent 唤醒引擎的 Web UI 服务器。
-func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Pool, ar *autoreply.Engine, wakeEngine *wake.Engine, logger *zap.Logger) (*Server, error) {
+func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Pool, ar *autoreply.Engine, wakeEngine *wake.Engine, activate LoginActivator, logger *zap.Logger) (*Server, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -67,7 +74,7 @@ func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Poo
 		pool:         pool,
 		logger:       logger,
 		autoreply:    ar,
-		loginMgr:     NewLoginManager(cfg, pool, logger),
+		loginMgr:     NewLoginManager(cfg, pool, activate, logger),
 		asrInstaller: NewASRInstaller(),
 		depInstaller: NewDepInstaller(),
 		wakeEngine:   wakeEngine,

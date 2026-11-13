@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -117,18 +118,24 @@ func (s *LoginSession) setError(msg string) {
 	s.mu.Unlock()
 }
 
+// LoginActivator 把完成认证的临时客户端交接给常驻运行器。
+// 回调在临时 client.Run 仍存活时调用，因此实现必须异步启动新连接；
+// 返回后临时 Run 会结束，常驻连接继续用服务级 ctx 运行。
+type LoginActivator func(acc *tgclient.Account) error
+
 // LoginManager 管理所有 Web 端登录会话。
 type LoginManager struct {
-	cfg    *config.Config
-	pool   *tgclient.Pool
-	logger *zap.Logger
+	cfg      *config.Config
+	pool     *tgclient.Pool
+	logger   *zap.Logger
+	activate LoginActivator
 
 	mu       sync.RWMutex
 	sessions map[string]*LoginSession
 }
 
 // NewLoginManager 创建登录管理器。
-func NewLoginManager(cfg *config.Config, pool *tgclient.Pool, logger *zap.Logger) *LoginManager {
+func NewLoginManager(cfg *config.Config, pool *tgclient.Pool, activate LoginActivator, logger *zap.Logger) *LoginManager {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -136,6 +143,7 @@ func NewLoginManager(cfg *config.Config, pool *tgclient.Pool, logger *zap.Logger
 		cfg:      cfg,
 		pool:     pool,
 		logger:   logger,
+		activate: activate,
 		sessions: make(map[string]*LoginSession),
 	}
 	// 定期清理已完成的会话
@@ -148,7 +156,6 @@ func (m *LoginManager) cleanupLoop() {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for range t.C {
-		cutoff := time.Now().Add(-30 * time.Minute)
 		m.mu.Lock()
 		for id, s := range m.sessions {
 			s.mu.RLock()
@@ -163,7 +170,6 @@ func (m *LoginManager) cleanupLoop() {
 			}
 		}
 		m.mu.Unlock()
-		_ = cutoff
 	}
 }
 
@@ -201,7 +207,7 @@ func (m *LoginManager) StartQR(ctx context.Context, account string, apiID int, a
 	if account == "" {
 		account = "main"
 	}
-	if acc, ok := m.pool.Get(account); ok && acc != nil && acc.Self() != nil {
+	if acc, ok := m.pool.Get(account); ok && acc != nil && acc.Self() != nil && acc.API() != nil {
 		return nil, fmt.Errorf("账号 %q 已登录，请先删除或换一个名字", account)
 	}
 
@@ -226,6 +232,7 @@ func (m *LoginManager) StartQR(ctx context.Context, account string, apiID int, a
 
 	sess := m.newSession(account)
 	sess.setState(StateWaitingQR)
+	// 只给「等待扫码」阶段限时；成功后立刻交给 Runtime 用服务级 ctx 常驻。
 	runCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	sess.cancel = cancel
 
@@ -236,53 +243,39 @@ func (m *LoginManager) StartQR(ctx context.Context, account string, apiID int, a
 // runQR 执行扫码登录流程。
 func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgclient.Account) {
 	defer close(sess.done)
-	defer sess.cancel()
+	if sess.cancel != nil {
+		defer sess.cancel()
+	}
 
-	waiter := tgclient.NewFloodWaiter(m.logger)
-	err := waiter.Run(ctx, func(ctx context.Context) error {
-		return acc.Client().Run(ctx, func(ctx context.Context) error {
-			dispatcher := acc.Dispatcher()
-			loggedIn := qrlogin.OnLoginToken(dispatcher)
-
-			_, authErr := acc.Client().QR().Auth(ctx, loggedIn, func(ctx context.Context, token qrlogin.Token) error {
-				exp := time.Now().Add(30 * time.Second)
-				sess.setQR(token.URL(), exp)
-				m.logger.Info("生成二维码", zap.String("account", sess.account))
-				return nil
-			})
-			if authErr != nil {
-				sess.setError(fmt.Sprintf("扫码登录失败: %v", authErr))
-				return nil
-			}
-
-			// 登录成功，取账号信息
-			st, err := tgclient.CheckStatus(ctx, acc)
-			if err != nil || !st.Authorized {
-				sess.setError("登录后状态异常")
-				return nil
-			}
-
-			// 注册到池
-			m.pool.Add(acc)
-
-			sess.mu.Lock()
-			sess.state = StateSuccess
-			sess.userID = st.UserID
-			sess.username = st.Username
-			sess.qrURL = ""
-			sess.mu.Unlock()
-			m.logger.Info("扫码登录成功",
-				zap.String("account", sess.account),
-				zap.Int64("user_id", st.UserID))
-
-			// ★ 不要从 Run 回调返回：返回会关闭客户端，而 gotd 不允许
-			//   对同一 Client 再次 Run。保持在此直到上下文取消。
-			<-ctx.Done()
+	err := acc.Client().Run(ctx, func(ctx context.Context) error {
+		loggedIn := qrlogin.OnLoginToken(acc.Dispatcher())
+		_, authErr := acc.Client().QR().Auth(ctx, loggedIn, func(ctx context.Context, token qrlogin.Token) error {
+			exp := time.Now().Add(30 * time.Second)
+			sess.setQR(token.URL(), exp)
+			m.logger.Info("生成二维码", zap.String("account", sess.account))
 			return nil
 		})
+		if authErr != nil {
+			return authErr
+		}
+
+		st, err := tgclient.CheckStatus(ctx, acc)
+		if err != nil {
+			return err
+		}
+		if !st.Authorized {
+			return errors.New("登录后状态仍为未授权")
+		}
+
+		if err := m.finishLogin(sess, acc, st); err != nil {
+			return err
+		}
+		// 直接返回关闭临时 Run：Runtime 会用新构造的 Account 读取 session.json
+		// 并建立常驻连接，不会复用同一个 Client 二次 Run。
+		return nil
 	})
 	if err != nil && sess.Snap().State != StateSuccess {
-		sess.setError(fmt.Sprintf("连接失败: %v", err))
+		sess.setError(fmt.Sprintf("扫码登录失败: %v", normalizeLoginEnd(err)))
 	}
 }
 
@@ -369,47 +362,68 @@ func containsAny(s string, subs ...string) bool {
 // runPhone 执行手机号登录流程。
 func (m *LoginManager) runPhone(ctx context.Context, sess *LoginSession, acc *tgclient.Account, phone string) {
 	defer close(sess.done)
-	defer sess.cancel()
+	if sess.cancel != nil {
+		defer sess.cancel()
+	}
 
-	waiter := tgclient.NewFloodWaiter(m.logger)
-	err := waiter.Run(ctx, func(ctx context.Context) error {
-		return acc.Client().Run(ctx, func(ctx context.Context) error {
-			opts := tgclient.AuthOptions{
-				Mode:     tgclient.AuthModePhone,
-				Phone:    phone,
-				Prompt:   &webPrompter{sess: sess},
-				Password: "", // 通过 Prompt 提供
-			}
-			if err := tgclient.Authenticate(ctx, acc, opts, m.logger); err != nil {
-				sess.setError(fmt.Sprintf("登录失败: %v", err))
-				return nil
-			}
+	err := acc.Client().Run(ctx, func(ctx context.Context) error {
+		opts := tgclient.AuthOptions{
+			Mode:     tgclient.AuthModePhone,
+			Phone:    phone,
+			Prompt:   &webPrompter{sess: sess},
+			Password: "", // 通过 Prompt 提供
+		}
+		if err := tgclient.Authenticate(ctx, acc, opts, m.logger); err != nil {
+			return err
+		}
 
-			st, err := tgclient.CheckStatus(ctx, acc)
-			if err != nil || !st.Authorized {
-				sess.setError("登录后状态异常")
-				return nil
-			}
+		st, err := tgclient.CheckStatus(ctx, acc)
+		if err != nil {
+			return err
+		}
+		if !st.Authorized {
+			return errors.New("登录后状态仍为未授权")
+		}
 
-			m.pool.Add(acc)
-
-			sess.mu.Lock()
-			sess.state = StateSuccess
-			sess.userID = st.UserID
-			sess.username = st.Username
-			sess.mu.Unlock()
-			m.logger.Info("手机号登录成功",
-				zap.String("account", sess.account),
-				zap.Int64("user_id", st.UserID))
-
-			// 保持连接直到上下文取消（不要返回，见 runQR 注释）
-			<-ctx.Done()
-			return nil
-		})
+		if err := m.finishLogin(sess, acc, st); err != nil {
+			return err
+		}
+		// 同 runQR：临时 Run 结束，常驻运行由 Runtime 接管。
+		return nil
 	})
 	if err != nil && sess.Snap().State != StateSuccess {
-		sess.setError(fmt.Sprintf("连接失败: %v", err))
+		sess.setError(fmt.Sprintf("手机号登录失败: %v", normalizeLoginEnd(err)))
 	}
+}
+
+// finishLogin 把认证结果交给常驻运行器，并更新登录会话状态。
+func (m *LoginManager) finishLogin(sess *LoginSession, acc *tgclient.Account, st *tgclient.Status) error {
+	if m.activate == nil {
+		return errors.New("账号运行器未初始化")
+	}
+	if err := m.activate(acc); err != nil {
+		return fmt.Errorf("激活账号失败: %w", err)
+	}
+
+	sess.mu.Lock()
+	sess.state = StateSuccess
+	sess.userID = st.UserID
+	sess.username = st.Username
+	sess.qrURL = ""
+	sess.mu.Unlock()
+	m.logger.Info("登录成功，账号已即时激活（无需重启）",
+		zap.String("account", sess.account),
+		zap.Int64("user_id", st.UserID))
+	return nil
+}
+
+func normalizeLoginEnd(err error) error {
+	// floodwait.Waiter 在 cancel 后会返回 context.Canceled；登录已成功时
+	// finishLogin 已把状态置为 success，外层不会走到这里。
+	if errors.Is(err, context.Canceled) {
+		return errors.New("登录流程已结束")
+	}
+	return err
 }
 
 // SubmitCode 提交验证码。

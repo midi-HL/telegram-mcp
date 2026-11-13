@@ -272,6 +272,10 @@ func (c *Config) UpsertAccount(acc Account) {
 		}
 	}
 	c.Accounts = append(c.Accounts, acc)
+	// 首个账号自动成为默认账号：零账号启动后 Web 登录也能立即作为默认使用。
+	if len(c.Accounts) == 1 {
+		c.DefaultAccount = acc.Name
+	}
 }
 
 // EffectiveCredentials 返回指定账号实际生效的凭据及来源。

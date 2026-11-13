@@ -187,8 +187,9 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 	runtime := tgclient.NewRuntime(runCtx, pool, activate, a.Logger)
 	initial := runtime.ActivateExisting()
 
-	// Web 登录成功回调：先构造并排队常驻 Account，但延迟启动其 client.Run，
-	// 等临时登录连接关闭后再启动，避免两个连接共用同一 session 文件。
+	// Web 登录完成（临时 client.Run 已返回、session.json 已落盘）后，
+	// 用服务级 ctx 启动常驻连接。这个回调是同步的：只有账号真正就绪，
+	// 页面才会显示登录成功。
 	loginActivator := webui.LoginActivator(func(acc *tgclient.Account) error {
 		saved := cfg.Account(acc.Name)
 		if saved == nil {
@@ -198,22 +199,15 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		go func() {
-			// 临时登录 Run 返回后 session.json 已落盘；留一点时间给
-			// gotd 关闭连接/释放文件句柄，再建立服务级常驻连接。
-			select {
-			case <-time.After(200 * time.Millisecond):
-			case <-runCtx.Done():
-				return
+		ctl := runtime.Activate(persistent)
+		readyCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
+		defer cancel()
+		if err := runtime.WaitReady(readyCtx, ctl); err != nil {
+			if readyCtx.Err() != nil {
+				return fmt.Errorf("激活账号 %q 超时: %w", acc.Name, err)
 			}
-			ctl := runtime.Activate(persistent)
-			readyCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
-			defer cancel()
-			if err := runtime.WaitReady(readyCtx, ctl); err != nil && readyCtx.Err() == nil {
-				a.Logger.Error("新登录账号激活失败",
-					zap.String("account", acc.Name), zap.Error(err))
-			}
-		}()
+			return fmt.Errorf("激活账号 %q: %w", acc.Name, err)
+		}
 		return nil
 	})
 

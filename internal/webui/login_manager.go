@@ -118,9 +118,8 @@ func (s *LoginSession) setError(msg string) {
 	s.mu.Unlock()
 }
 
-// LoginActivator 把完成认证的临时客户端交接给常驻运行器。
-// 回调在临时 client.Run 仍存活时调用，因此实现必须异步启动新连接；
-// 返回后临时 Run 会结束，常驻连接继续用服务级 ctx 运行。
+// LoginActivator 在临时认证连接结束后，把账号接入常驻运行器。
+// 只有返回 nil 才算登录成功；此时新账号已可被 MCP / Web UI 立即使用。
 type LoginActivator func(acc *tgclient.Account) error
 
 // LoginManager 管理所有 Web 端登录会话。
@@ -247,7 +246,7 @@ func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgcli
 		defer sess.cancel()
 	}
 
-	err := acc.Client().Run(ctx, func(ctx context.Context) error {
+	runErr := acc.Client().Run(ctx, func(ctx context.Context) error {
 		loggedIn := qrlogin.OnLoginToken(acc.Dispatcher())
 		_, authErr := acc.Client().QR().Auth(ctx, loggedIn, func(ctx context.Context, token qrlogin.Token) error {
 			exp := time.Now().Add(30 * time.Second)
@@ -266,16 +265,16 @@ func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgcli
 		if !st.Authorized {
 			return errors.New("登录后状态仍为未授权")
 		}
-
-		if err := m.finishLogin(sess, acc, st); err != nil {
-			return err
-		}
-		// 直接返回关闭临时 Run：Runtime 会用新构造的 Account 读取 session.json
-		// 并建立常驻连接，不会复用同一个 Client 二次 Run。
+		// 只记录认证结果；返回后临时 client.Run 结束，session 已落盘。
 		return nil
 	})
-	if err != nil && sess.Snap().State != StateSuccess {
-		sess.setError(fmt.Sprintf("扫码登录失败: %v", normalizeLoginEnd(err)))
+	if runErr != nil {
+		sess.setError(fmt.Sprintf("扫码登录失败: %v", normalizeLoginEnd(runErr)))
+		return
+	}
+	// 临时连接已关闭，再同步启动并等待常驻账号就绪。
+	if err := m.finishLogin(sess, acc, &tgclient.Status{Authorized: true}); err != nil {
+		sess.setError(fmt.Sprintf("激活账号失败: %v", err))
 	}
 }
 
@@ -366,7 +365,7 @@ func (m *LoginManager) runPhone(ctx context.Context, sess *LoginSession, acc *tg
 		defer sess.cancel()
 	}
 
-	err := acc.Client().Run(ctx, func(ctx context.Context) error {
+	runErr := acc.Client().Run(ctx, func(ctx context.Context) error {
 		opts := tgclient.AuthOptions{
 			Mode:     tgclient.AuthModePhone,
 			Phone:    phone,
@@ -384,15 +383,15 @@ func (m *LoginManager) runPhone(ctx context.Context, sess *LoginSession, acc *tg
 		if !st.Authorized {
 			return errors.New("登录后状态仍为未授权")
 		}
-
-		if err := m.finishLogin(sess, acc, st); err != nil {
-			return err
-		}
-		// 同 runQR：临时 Run 结束，常驻运行由 Runtime 接管。
+		// 返回后临时连接关闭，再交给 Runtime 建立常驻连接。
 		return nil
 	})
-	if err != nil && sess.Snap().State != StateSuccess {
-		sess.setError(fmt.Sprintf("手机号登录失败: %v", normalizeLoginEnd(err)))
+	if runErr != nil {
+		sess.setError(fmt.Sprintf("手机号登录失败: %v", normalizeLoginEnd(runErr)))
+		return
+	}
+	if err := m.finishLogin(sess, acc, &tgclient.Status{Authorized: true}); err != nil {
+		sess.setError(fmt.Sprintf("激活账号失败: %v", err))
 	}
 }
 

@@ -106,7 +106,9 @@ func NewPool(logger *zap.Logger) *Pool {
 }
 
 // NewAccount 构造一个账号客户端（不启动）。
+// 凭据为空时使用项目内置的官方公开应用凭据，也接受环境变量/显式配置覆盖。
 func NewAccount(cfg config.Account) (*Account, error) {
+	config.ApplyCredentials(&cfg)
 	if cfg.APIID <= 0 {
 		return nil, fmt.Errorf("账号 %q: api_id 无效 (%d)", cfg.Name, cfg.APIID)
 	}

@@ -51,13 +51,13 @@ func (a *App) runAuth(ctx context.Context, args []string) error {
 	a.commonFlags(fs)
 
 	var (
-		accountName = fs.String("account", "main", "账号名")
-		useQR       = fs.Bool("qr", false, "使用扫码登录")
-		phone       = fs.String("phone", "", "手机号（含国际区号，如 +8613800138000）")
-		password    = fs.String("password", "", "两步验证密码（可选）")
-		apiID       = fs.Int("api-id", 0, "Telegram api_id")
-		apiHash     = fs.String("api-hash", "", "Telegram api_hash")
-		codeFile    = fs.String("code-file", "", "从该文件读取验证码（非交互模式，配合后台登录）")
+		accountName  = fs.String("account", "main", "账号名")
+		useQR        = fs.Bool("qr", false, "使用扫码登录")
+		phone        = fs.String("phone", "", "手机号（含国际区号，如 +8613800138000）")
+		password     = fs.String("password", "", "两步验证密码（可选）")
+		apiID        = fs.Int("api-id", 0, "Telegram api_id")
+		apiHash      = fs.String("api-hash", "", "Telegram api_hash")
+		codeFile     = fs.String("code-file", "", "从该文件读取验证码（非交互模式，配合后台登录）")
 		passwordFile = fs.String("password-file", "", "从该文件读取两步验证密码")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -78,17 +78,8 @@ func (a *App) runAuth(ctx context.Context, args []string) error {
 			hash = acc.APIHash
 		}
 	}
-	if envID, envHash, ok := config.EnvCredentials(); ok {
-		if id == 0 {
-			id = envID
-		}
-		if hash == "" {
-			hash = envHash
-		}
-	}
-	if id == 0 || hash == "" {
-		return fmt.Errorf("缺少 API 凭据：请用 --api-id/--api-hash 或环境变量 TELEGRAM_API_ID / TELEGRAM_API_HASH")
-	}
+	cred := config.ResolveCredentials(id, hash)
+	id, hash = cred.APIID, cred.APIHash
 
 	accCfg := config.Account{Name: *accountName, Phone: *phone, APIID: id, APIHash: hash}
 	cfg.UpsertAccount(accCfg)

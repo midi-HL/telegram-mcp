@@ -16,6 +16,45 @@
   <div id="pwd-success" class="success" hidden></div>
 </div>
 
+<div class="card" id="wake">
+  <h2>Agent 唤醒（新消息到达时）</h2>
+  <p class="hint">
+    开启后，Telegram 收到新消息会通知 Agent「去查看消息」，<strong>不强制回复</strong>。
+    外部消息会被包进 <code>&lt;untrusted_content&gt;</code>，不会被当作指令执行。
+  </p>
+  <label class="switch-row">
+    <input type="checkbox" id="wake-enabled">
+    <span>启用唤醒</span>
+  </label>
+  <form id="wake-form" class="stack-form">
+    <label>投递方式
+      <select id="wake-mode">
+        <option value="notify">notify · MCP 日志通知（推荐，兼容性最好）</option>
+        <option value="sampling">sampling · 给 Agent 发一条消息（忽略回复）</option>
+        <option value="webhook">webhook · POST 到自定义地址</option>
+        <option value="all">all · 同时使用以上全部方式</option>
+      </select>
+    </label>
+    <label class="check-row"><input type="checkbox" id="wake-include-text"> 通知里附带消息正文（默认开启）</label>
+    <label class="check-row"><input type="checkbox" id="wake-include-out"> 自己发出的消息也唤醒</label>
+    <label>会话防抖间隔（秒）<input type="number" id="wake-debounce" min="0" max="3600" value="2"></label>
+    <label>正文最大字符数<input type="number" id="wake-max-text" min="20" max="4000" value="280"></label>
+    <label>Webhook URL（webhook / all 模式必填）<input type="url" id="wake-webhook-url" placeholder="http://127.0.0.1:9000/telegram"></label>
+    <label>Webhook Bearer Token（可选）<input type="password" id="wake-webhook-token" autocomplete="off"></label>
+    <label>给 Agent 的提示语（留空用默认）<textarea id="wake-prompt" rows="2" placeholder="有新消息，请用 message history 查看并决定是否回复"></textarea></label>
+    <div class="form-actions">
+      <button type="submit">保存唤醒配置</button>
+      <button type="button" id="wake-test" class="btn-ghost">发送测试唤醒</button>
+      <button type="button" id="wake-pending" class="btn-ghost">查看待读</button>
+      <button type="button" id="wake-ack" class="btn-ghost">清空待读</button>
+    </div>
+  </form>
+  <div id="wake-status" class="hint" style="margin-top:8px">加载中…</div>
+  <div id="wake-error" class="error" hidden></div>
+  <div id="wake-success" class="success" hidden></div>
+  <pre id="wake-output" class="hint" hidden style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre>
+</div>
+
 <div class="card">
   <h2>服务信息</h2>
   <table class="table">

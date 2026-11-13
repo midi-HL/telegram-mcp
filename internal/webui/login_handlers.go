@@ -17,14 +17,27 @@ func (s *Server) handleAPICredentials(w http.ResponseWriter, r *http.Request) {
 		accs := make([]map[string]any, 0, len(s.cfg.Accounts))
 		for _, a := range s.cfg.Accounts {
 			accs = append(accs, map[string]any{
-				"name":        a.Name,
-				"api_id":      a.APIID,
+				"name":         a.Name,
+				"api_id":       a.APIID,
 				"api_hash_set": a.APIHash != "",
-				"phone":       maskPhone(a.Phone),
-				"session_dir": a.SessionDir,
+				"is_builtin":   config.IsBuiltinCredentials(a.APIID, a.APIHash),
+				"phone":        maskPhone(a.Phone),
+				"session_dir":  a.SessionDir,
 			})
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"accounts": accs})
+		envOverride := false
+		if _, ok := config.EnvCredentialPair(); ok {
+			envOverride = true
+		}
+		cred := s.cfg.EffectiveCredentials(s.cfg.DefaultAccount)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"accounts":          accs,
+			"builtin_api_id":    config.BuiltinAPIID,
+			"builtin_api_hash":  config.BuiltinAPIHash,
+			"effective_api_id":  cred.APIID,
+			"credential_source": cred.Source,
+			"env_override":      envOverride,
+		})
 
 	case http.MethodPost:
 		var req struct {
@@ -36,12 +49,8 @@ func (s *Server) handleAPICredentials(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
 			return
 		}
-		if req.APIID <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "api_id 必须是正整数"})
-			return
-		}
-		if req.APIHash == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "api_hash 不能为空"})
+		if req.APIID < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "api_id 不能为负数"})
 			return
 		}
 		name := req.Account
@@ -49,12 +58,17 @@ func (s *Server) handleAPICredentials(w http.ResponseWriter, r *http.Request) {
 			name = "main"
 		}
 
+		// 留空即用公开内置默认凭据；填写则替换。
+		// 环境变量只在运行时覆盖，不写进 config.json。
+		fill := config.Account{Name: name, APIID: req.APIID, APIHash: req.APIHash}
+		config.FillBuiltinCredentials(&fill)
+
 		// 保留已有的 phone/session 配置
 		existing := s.cfg.Account(name)
 		newAcc := config.Account{
 			Name:    name,
-			APIID:   req.APIID,
-			APIHash: req.APIHash,
+			APIID:   fill.APIID,
+			APIHash: fill.APIHash,
 		}
 		if existing != nil {
 			newAcc.Phone = existing.Phone
@@ -66,11 +80,15 @@ func (s *Server) handleAPICredentials(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
-		s.logger.Info("API 凭据已更新", zap.String("account", name), zap.Int("api_id", req.APIID))
+		effective := s.cfg.EffectiveCredentials(name)
+		s.logger.Info("API 凭据已更新", zap.String("account", name), zap.Int("api_id", fill.APIID))
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":      true,
-			"account": name,
-			"api_id":  req.APIID,
+			"ok":           true,
+			"account":      name,
+			"api_id":       effective.APIID,
+			"source":       effective.Source,
+			"is_builtin":   config.IsBuiltinCredentials(fill.APIID, fill.APIHash),
+			"env_override": effective.Source == "env",
 		})
 
 	default:
@@ -106,17 +124,8 @@ func (s *Server) handleAPILoginQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 未提供凭据时用配置里的
-	if req.APIID == 0 || req.APIHash == "" {
-		if acc := s.cfg.Account(defaultIfEmpty(req.Account, "main")); acc != nil {
-			if req.APIID == 0 {
-				req.APIID = acc.APIID
-			}
-			if req.APIHash == "" {
-				req.APIHash = acc.APIHash
-			}
-		}
-	}
+	cred := s.resolveLoginCredentials(req.Account, req.APIID, req.APIHash)
+	req.APIID, req.APIHash = cred.APIID, cred.APIHash
 
 	sess, err := s.loginMgr.StartQR(r.Context(), req.Account, req.APIID, req.APIHash)
 	if err != nil {
@@ -146,16 +155,8 @@ func (s *Server) handleAPILoginPhone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
 		return
 	}
-	if req.APIID == 0 || req.APIHash == "" {
-		if acc := s.cfg.Account(defaultIfEmpty(req.Account, "main")); acc != nil {
-			if req.APIID == 0 {
-				req.APIID = acc.APIID
-			}
-			if req.APIHash == "" {
-				req.APIHash = acc.APIHash
-			}
-		}
-	}
+	cred := s.resolveLoginCredentials(req.Account, req.APIID, req.APIHash)
+	req.APIID, req.APIHash = cred.APIID, cred.APIHash
 
 	sess, err := s.loginMgr.StartPhone(r.Context(), req.Account, req.APIID, req.APIHash, req.Phone)
 	if err != nil {
@@ -270,6 +271,20 @@ func (s *Server) handleAPILoginCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// resolveLoginCredentials 按「请求参数 → 已保存配置 → 内置凭据」解析，
+// 环境变量始终由 config.ResolveCredentials 保持最高优先级。
+func (s *Server) resolveLoginCredentials(account string, apiID int, apiHash string) config.Credentials {
+	if acc := s.cfg.Account(defaultIfEmpty(account, s.cfg.DefaultAccount)); acc != nil {
+		if apiID == 0 {
+			apiID = acc.APIID
+		}
+		if apiHash == "" {
+			apiHash = acc.APIHash
+		}
+	}
+	return config.ResolveCredentials(apiID, apiHash)
 }
 
 // defaultIfEmpty 空则返回默认值。

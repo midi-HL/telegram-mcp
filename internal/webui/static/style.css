@@ -396,3 +396,15 @@ code {
 
 /* ===== 小按钮 ===== */
 .btn-sm { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+
+/* ===== Agent 唤醒设置 ===== */
+.switch-row, .check-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text2); margin: 10px 0;
+}
+.switch-row input, .check-row input { width: auto; margin: 0; }
+#wake-output {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px; font-size: 11px;
+  font-family: ui-monospace, monospace; color: var(--text2);
+}

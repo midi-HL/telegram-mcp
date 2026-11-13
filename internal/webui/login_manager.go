@@ -196,9 +196,8 @@ func (m *LoginManager) newSession(account string) *LoginSession {
 
 // StartQR 启动扫码登录。
 func (m *LoginManager) StartQR(ctx context.Context, account string, apiID int, apiHash string) (*LoginSession, error) {
-	if apiID <= 0 || apiHash == "" {
-		return nil, fmt.Errorf("需要先配置 api_id 和 api_hash")
-	}
+	cred := config.ResolveCredentials(apiID, apiHash)
+	apiID, apiHash = cred.APIID, cred.APIHash
 	if account == "" {
 		account = "main"
 	}
@@ -289,9 +288,8 @@ func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgcli
 
 // StartPhone 启动手机号登录。
 func (m *LoginManager) StartPhone(ctx context.Context, account string, apiID int, apiHash string, phone string) (*LoginSession, error) {
-	if apiID <= 0 || apiHash == "" {
-		return nil, fmt.Errorf("需要先配置 api_id 和 api_hash")
-	}
+	cred := config.ResolveCredentials(apiID, apiHash)
+	apiID, apiHash = cred.APIID, cred.APIHash
 	if phone == "" {
 		return nil, fmt.Errorf("需要手机号（含国际区号，如 +8613800138000）")
 	}

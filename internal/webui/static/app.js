@@ -75,6 +75,132 @@
     });
   });
 
+  // ===== Agent 唤醒 =====
+  (function () {
+    const form = document.getElementById('wake-form');
+    if (!form) return;
+    const errBox = document.getElementById('wake-error');
+    const okBox = document.getElementById('wake-success');
+    const statusBox = document.getElementById('wake-status');
+    const output = document.getElementById('wake-output');
+
+    function showError(msg) {
+      errBox.textContent = msg;
+      errBox.hidden = false;
+      okBox.hidden = true;
+    }
+    function showOK(msg) {
+      okBox.textContent = msg;
+      okBox.hidden = false;
+      errBox.hidden = true;
+    }
+    function showOutput(data) {
+      output.textContent = JSON.stringify(data, null, 2);
+      output.hidden = false;
+    }
+
+    function readConfig() {
+      return {
+        enabled: document.getElementById('wake-enabled').checked,
+        mode: document.getElementById('wake-mode').value,
+        include_out: document.getElementById('wake-include-out').checked,
+        include_text: document.getElementById('wake-include-text').checked,
+        max_text_runes: parseInt(document.getElementById('wake-max-text').value, 10) || 280,
+        debounce_seconds: parseInt(document.getElementById('wake-debounce').value, 10) || 0,
+        webhook_url: document.getElementById('wake-webhook-url').value.trim(),
+        webhook_token: document.getElementById('wake-webhook-token').value.trim(),
+        prompt: document.getElementById('wake-prompt').value.trim()
+      };
+    }
+
+    function fillConfig(c) {
+      document.getElementById('wake-enabled').checked = !!c.enabled;
+      document.getElementById('wake-mode').value = c.mode || 'notify';
+      document.getElementById('wake-include-out').checked = !!c.include_out;
+      document.getElementById('wake-include-text').checked = c.include_text !== false;
+      document.getElementById('wake-max-text').value = c.max_text_runes || 280;
+      document.getElementById('wake-debounce').value = c.debounce_seconds || 0;
+      document.getElementById('wake-webhook-url').value = c.webhook_url || '';
+      document.getElementById('wake-webhook-token').value = c.webhook_token || '';
+      document.getElementById('wake-prompt').value = c.prompt || '';
+    }
+
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/wake');
+        const d = await res.json();
+        if (!res.ok) { statusBox.textContent = d.error || '加载失败'; return; }
+        fillConfig(d.config || {});
+        const s = d.stats || {};
+        statusBox.textContent = '当前：' + (s.enabled ? '已开启' : '已关闭') +
+          ' · 模式 ' + (s.mode || 'notify') + ' · 待读 ' + (s.pending || 0) +
+          ' · 已投递 ' + (s.delivered || 0) + ' · 传输 ' + (s.transport || '-');
+      } catch (e) {
+        statusBox.textContent = '加载失败：' + e.message;
+      }
+    }
+
+    async function postJSON(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload || {})
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+      return d;
+    }
+
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      try {
+        const d = await postJSON('/api/wake', readConfig());
+        showOK('唤醒配置已保存并立即生效');
+        fillConfig(d.config || readConfig());
+        await loadStatus();
+      } catch (err) { showError(err.message); }
+    });
+
+    document.getElementById('wake-enabled').addEventListener('change', async function () {
+      try {
+        await postJSON('/api/wake/toggle', {enabled: this.checked});
+        showOK(this.checked ? '已开启 Agent 唤醒' : '已关闭 Agent 唤醒');
+        await loadStatus();
+      } catch (err) { showError(err.message); }
+    });
+
+    document.getElementById('wake-test').addEventListener('click', async function () {
+      try {
+        const d = await postJSON('/api/wake/test', {text: '这是一条来自 Web UI 的唤醒测试消息'});
+        showOK('测试已投递：' + ((d.notification && d.notification.channels || []).join(', ') || '已加入待读队列'));
+        showOutput(d.notification);
+        await loadStatus();
+      } catch (err) { showError(err.message); }
+    });
+
+    document.getElementById('wake-pending').addEventListener('click', async function () {
+      try {
+        const res = await fetch('/api/wake/pending');
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || '读取失败');
+        const list = d.notifications || [];
+        showOK('待读共 ' + list.length + ' 条');
+        showOutput(list.length ? list : {message: '队列为空'});
+      } catch (err) { showError(err.message); }
+    });
+
+    document.getElementById('wake-ack').addEventListener('click', async function () {
+      try {
+        const d = await postJSON('/api/wake/ack', {});
+        showOK('已清空 ' + (d.cleared || 0) + ' 条待读');
+        output.hidden = true;
+        await loadStatus();
+      } catch (err) { showError(err.message); }
+    });
+
+    loadStatus();
+  })();
+
   // 修改密码
   const pwdForm = document.getElementById('password-form');
   if (pwdForm) {

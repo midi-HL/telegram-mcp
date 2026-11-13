@@ -27,15 +27,19 @@
 </div>
 
 <div class="card">
-  <h2>第 1 步：Telegram API 凭据</h2>
+  <h2>第 1 步：Telegram API 凭据（可选）</h2>
   <p class="hint">
-    在 <a href="https://my.telegram.org" target="_blank">my.telegram.org</a> → API development tools 创建应用后获得。
+    ✅ 项目已在源码中公开内置默认应用凭据，且会编译进每个发布二进制，<strong>直接点「生成二维码」即可登录</strong>，
+    不用去 <a href="https://my.telegram.org" target="_blank">my.telegram.org</a> 申请。
+    如需使用自己的应用凭据，填下面两项覆盖；全部留空并保存可恢复内置值。
+    环境变量 <code>TELEGRAM_API_ID</code> / <code>TELEGRAM_API_HASH</code> 优先级最高。
   </p>
   <form id="cred-form" class="inline-form">
     <input type="text" id="cred-account" placeholder="账号名（默认 main）">
-    <input type="number" id="cred-api-id" placeholder="api_id（数字）" required>
-    <input type="text" id="cred-api-hash" placeholder="api_hash（32 位字符串）" required>
+    <input type="number" id="cred-api-id" placeholder="api_id（留空用内置）">
+    <input type="text" id="cred-api-hash" placeholder="api_hash（留空用内置）">
     <button type="submit">保存凭据</button>
+    <button type="button" id="cred-reset" class="btn-ghost">恢复内置</button>
   </form>
   <div id="cred-status" class="hint" style="margin-top:8px"></div>
   <div id="cred-error" class="error" hidden></div>
@@ -43,7 +47,7 @@
 </div>
 
 <div class="card">
-  <h2>第 2 步：登录</h2>
+  <h2>第 2 步：登录（无需先填凭据）</h2>
   <div class="tabs">
     <button class="tab active" data-tab="qr">扫码登录</button>
     <button class="tab" data-tab="phone">手机号登录</button>

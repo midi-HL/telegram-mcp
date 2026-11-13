@@ -44,19 +44,21 @@ func (a *App) usage() {
 命令:
   auth     登录 Telegram 账号（扫码或手机号）
   serve    启动 MCP 服务
-  doctor   环境自检
-  asr      语音转写配置（setup 下载模型 / status / config）
-  version  打印版本
+	  doctor   完整可行性自检
+	  asr      语音转写配置（setup 下载模型 / status / config）
+	  wake     Agent 唤醒（status / on / off / config / test / pending / ack）
+	  version  打印版本
 
 通用 flags:
   --data-dir <path>   数据目录（默认 %s，可用 TGMCP_DATA_DIR 覆盖）
   --account <name>    账号名（默认 main）
 
 示例:
-  tgmcp auth --qr
-  tgmcp auth --phone +8613800138000
-  tgmcp serve --stdio
   tgmcp doctor
+  tgmcp serve                  # 直接启动 Web UI（内置 API 凭据，不用申请）
+  tgmcp auth --qr
+  tgmcp wake on                # 新消息到达时唤醒 Agent
+  tgmcp wake status --webui http://127.0.0.1:8080
 `, a.Version, config.DefaultDataDir())
 }
 
@@ -78,6 +80,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return a.runDoctor(ctx, rest)
 	case "asr":
 		return a.runASR(ctx, rest)
+	case "wake":
+		return a.runWake(ctx, rest)
 	case "version", "-v", "--version":
 		fmt.Fprintf(a.Stdout, "tgmcp %s\n", a.Version)
 		return nil
@@ -91,8 +95,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 }
 
 // commonFlags 注册所有子命令共用的 flag。
+// 默认值沿用 App.DataDir，避免 flag 解析把调用方预置的目录清零。
 func (a *App) commonFlags(fs *flag.FlagSet) {
-	fs.StringVar(&a.DataDir, "data-dir", "", "数据目录")
+	fs.StringVar(&a.DataDir, "data-dir", a.DataDir, "数据目录")
 }
 
 // resolveConfig 加载配置（含 --data-dir 覆盖）。

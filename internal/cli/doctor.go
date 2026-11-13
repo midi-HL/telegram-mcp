@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,7 +13,7 @@ import (
 	"github.com/midi-HL/telegram-mcp/internal/config"
 )
 
-// runDoctor 执行环境自检。
+// runDoctor 执行完整可行性自检；检查结果不会修改配置或连接 Telegram。
 func (a *App) runDoctor(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
@@ -25,14 +27,14 @@ func (a *App) runDoctor(ctx context.Context, args []string) error {
 		return fmt.Errorf("加载配置: %w", err)
 	}
 
-	fmt.Fprintf(a.Stdout, "tgmcp 环境自检\n")
+	fmt.Fprintf(a.Stdout, "tgmcp 可行性自检\n")
 	fmt.Fprintf(a.Stdout, "  版本      : %s\n", a.Version)
 	fmt.Fprintf(a.Stdout, "  Go 版本   : %s\n", runtime.Version())
 	fmt.Fprintf(a.Stdout, "  平台      : %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(a.Stdout, "  cgo       : %v\n", isCgo())
 	fmt.Fprintf(a.Stdout, "  数据目录  : %s\n", cfg.DataDir)
 
-	// 检查数据目录可写
+	// 1. 数据目录可写 + 配置可读
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		fmt.Fprintf(a.Stdout, "  数据目录  : ❌ 无法创建 (%v)\n", err)
 	} else {
@@ -44,18 +46,27 @@ func (a *App) runDoctor(ctx context.Context, args []string) error {
 			fmt.Fprintf(a.Stdout, "  可写性    : ✅\n")
 		}
 	}
-
-	// API 凭据
-	if id, hash, ok := config.EnvCredentials(); ok {
-		fmt.Fprintf(a.Stdout, "  API 凭据  : ✅ 环境变量 (id=%d, hash=%s...)\n", id, mask(hash))
+	if _, err := os.Stat(config.Path(cfg.DataDir)); err == nil {
+		fmt.Fprintf(a.Stdout, "  配置文件  : ✅ config.json 可读\n")
 	} else {
-		fmt.Fprintf(a.Stdout, "  API 凭据  : ⚠ 环境变量未设置（可用 --api-id/--api-hash 或 TELEGRAM_API_ID/HASH）\n")
+		fmt.Fprintf(a.Stdout, "  配置文件  : ℹ 不存在，将使用开箱即用默认配置\n")
 	}
 
-	// 账号
+	// 2. 凭据：内置 + 可替换
+	cred := cfg.EffectiveCredentials(cfg.DefaultAccount)
+	switch cred.Source {
+	case "env":
+		fmt.Fprintf(a.Stdout, "  API 凭据  : ✅ 环境变量覆盖 (id=%d, hash=%s...)\n", cred.APIID, mask(cred.APIHash))
+	case "builtin":
+		fmt.Fprintf(a.Stdout, "  API 凭据  : ✅ 已公开内置默认凭据 (id=%d)，开箱即用\n", cred.APIID)
+	default:
+		fmt.Fprintf(a.Stdout, "  API 凭据  : ✅ 自定义配置 (id=%d, hash=%s...)\n", cred.APIID, mask(cred.APIHash))
+	}
+
+	// 3. 账号与 session
 	fmt.Fprintf(a.Stdout, "\n账号 (%d 个):\n", len(cfg.Accounts))
 	if len(cfg.Accounts) == 0 {
-		fmt.Fprintf(a.Stdout, "  （无，请运行 tgmcp auth）\n")
+		fmt.Fprintf(a.Stdout, "  （无；可直接打开 Web UI 登录，无需命令行配置）\n")
 	}
 	for _, acc := range cfg.Accounts {
 		sessionPath := filepath.Join(acc.SessionDir, "session.json")
@@ -67,14 +78,80 @@ func (a *App) runDoctor(ctx context.Context, args []string) error {
 		if acc.Name == cfg.DefaultAccount {
 			mark = "* "
 		}
-		fmt.Fprintf(a.Stdout, "  %s%s  %s  (api_id=%d)\n", mark, acc.Name, exists, acc.APIID)
+		source := "自定义"
+		if config.IsBuiltinCredentials(acc.APIID, acc.APIHash) {
+			source = "内置"
+		}
+		fmt.Fprintf(a.Stdout, "  %s%s  %s  (api_id=%d, %s)\n", mark, acc.Name, exists, acc.APIID, source)
 	}
 
-	// Web UI / ASR 配置摘要
-	fmt.Fprintf(a.Stdout, "\n配置:\n")
-	fmt.Fprintf(a.Stdout, "  Web UI    : enabled=%v, %s:%d\n", cfg.WebUI.Enabled, cfg.WebUI.Host, cfg.WebUI.Port)
+	// 4. Web UI 端口可用性（只尝试监听后立刻释放，不会启动服务）
+	fmt.Fprintf(a.Stdout, "\n服务配置:\n")
+	addr := net.JoinHostPort(cfg.WebUI.Host, fmt.Sprintf("%d", cfg.WebUI.Port))
+	ln, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		fmt.Fprintf(a.Stdout, "  Web UI    : ⚠ %s 当前不可绑定（%v）；可能已被 tgmcp 占用，属正常现象\n", addr, listenErr)
+	} else {
+		_ = ln.Close()
+		fmt.Fprintf(a.Stdout, "  Web UI    : ✅ %s 可绑定\n", addr)
+	}
+	fmt.Fprintf(a.Stdout, "  浏览器入口: http://%s:%d/ui\n", displayHost(cfg.WebUI.Host), cfg.WebUI.Port)
 	fmt.Fprintf(a.Stdout, "  ASR       : backend=%s\n", cfg.ASR.Backend)
-	fmt.Fprintf(a.Stdout, "\n自检完成\n")
+	fmt.Fprintf(a.Stdout, "  Agent 唤醒: enabled=%v, mode=%s", cfg.Wake.Enabled, cfg.Wake.Mode)
+	if cfg.Wake.Mode == "webhook" || cfg.Wake.Mode == "all" {
+		if err := validateWakeURL(cfg.Wake.WebhookURL); err != nil {
+			fmt.Fprintf(a.Stdout, "  ⚠ webhook=%v\n", err)
+		} else {
+			fmt.Fprintf(a.Stdout, "  webhook=✅\n")
+		}
+	} else {
+		fmt.Fprintf(a.Stdout, "\n")
+	}
+
+	// 5. 给小白的下一步
+	fmt.Fprintf(a.Stdout, "\n建议:\n")
+	switch {
+	case len(cfg.Accounts) == 0:
+		fmt.Fprintf(a.Stdout, "  1. 运行 tgmcp serve（Web UI 会立即启动）\n")
+		fmt.Fprintf(a.Stdout, "  2. 浏览器打开 http://%s:%d/ui，默认密码 Admin\n", displayHost(cfg.WebUI.Host), cfg.WebUI.Port)
+		fmt.Fprintf(a.Stdout, "  3. 在「账号」页直接扫码登录，无需申请 api_id/api_hash\n")
+		fmt.Fprintf(a.Stdout, "  4. 登录后立即在「设置」页修改密码\n")
+	case !hasAnySession(cfg):
+		fmt.Fprintf(a.Stdout, "  已有账号配置但没有 session，请打开 Web UI 完成登录\n")
+	default:
+		fmt.Fprintf(a.Stdout, "  已具备运行条件；用 tgmcp serve --http 启动 MCP HTTP 传输，或接入 stdio\n")
+	}
+	fmt.Fprintf(a.Stdout, "\n自检完成（只读检查，未连接 Telegram）\n")
+	return nil
+}
+
+func displayHost(host string) string {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return "127.0.0.1"
+	}
+	return host
+}
+
+func hasAnySession(cfg *config.Config) bool {
+	for _, acc := range cfg.Accounts {
+		if acc.SessionDir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(acc.SessionDir, "session.json")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func validateWakeURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("未填写")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("需要 http:// 或 https:// 地址")
+	}
 	return nil
 }
 

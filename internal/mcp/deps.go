@@ -12,6 +12,7 @@ import (
 	"github.com/midi-HL/telegram-mcp/internal/config"
 	tgclient "github.com/midi-HL/telegram-mcp/internal/telegram"
 	"github.com/midi-HL/telegram-mcp/internal/trust"
+	"github.com/midi-HL/telegram-mcp/internal/wake"
 )
 
 // Deps 是工具共享的依赖。
@@ -25,6 +26,8 @@ type Deps struct {
 	Guard *trust.Guard
 	// AutoReply 是自动回复引擎（可为 nil）
 	AutoReply *autoreply.Engine
+	// Wake 是新消息唤醒 Agent 引擎（可为 nil）
+	Wake *wake.Engine
 
 	// 每个账号一个 resolver，延迟初始化
 	resolverMu sync.Mutex

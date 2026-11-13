@@ -19,6 +19,7 @@ import (
 	"github.com/midi-HL/telegram-mcp/internal/cache"
 	"github.com/midi-HL/telegram-mcp/internal/config"
 	tgclient "github.com/midi-HL/telegram-mcp/internal/telegram"
+	"github.com/midi-HL/telegram-mcp/internal/wake"
 )
 
 //go:embed templates/*.html static/*
@@ -29,14 +30,15 @@ const sessionCookie = "tgmcp_session"
 
 // Server 是 Web UI 服务器。
 type Server struct {
-	cfg       *config.Config
-	store     *cache.Store
-	pool      *tgclient.Pool
-	logger    *zap.Logger
-	autoreply *autoreply.Engine
-	loginMgr    *LoginManager
+	cfg          *config.Config
+	store        *cache.Store
+	pool         *tgclient.Pool
+	logger       *zap.Logger
+	autoreply    *autoreply.Engine
+	loginMgr     *LoginManager
 	asrInstaller *ASRInstaller
 	depInstaller *DepInstaller
+	wakeEngine   *wake.Engine
 
 	tmpl *template.Template
 	mux  *http.ServeMux
@@ -44,11 +46,11 @@ type Server struct {
 
 // New 创建 Web UI 服务器。
 func New(cfg *config.Config, store *cache.Store, pool *tgclient.Pool, logger *zap.Logger) (*Server, error) {
-	return NewWithAutoReply(cfg, store, pool, nil, logger)
+	return NewWithAutoReply(cfg, store, pool, nil, nil, logger)
 }
 
-// NewWithAutoReply 创建带自动回复引擎的 Web UI 服务器。
-func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Pool, ar *autoreply.Engine, logger *zap.Logger) (*Server, error) {
+// NewWithAutoReply 创建带自动回复 / Agent 唤醒引擎的 Web UI 服务器。
+func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Pool, ar *autoreply.Engine, wakeEngine *wake.Engine, logger *zap.Logger) (*Server, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -60,16 +62,17 @@ func NewWithAutoReply(cfg *config.Config, store *cache.Store, pool *tgclient.Poo
 	}
 
 	s := &Server{
-		cfg:       cfg,
-		store:     store,
-		pool:      pool,
-		logger:    logger,
-		autoreply: ar,
+		cfg:          cfg,
+		store:        store,
+		pool:         pool,
+		logger:       logger,
+		autoreply:    ar,
 		loginMgr:     NewLoginManager(cfg, pool, logger),
 		asrInstaller: NewASRInstaller(),
 		depInstaller: NewDepInstaller(),
-		tmpl:      tmpl,
-		mux:       http.NewServeMux(),
+		wakeEngine:   wakeEngine,
+		tmpl:         tmpl,
+		mux:          http.NewServeMux(),
 	}
 
 	// 确保凭据存在
@@ -135,6 +138,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/asr/environment", s.withAuth(s.handleAPIASREnvironment))
 	s.mux.HandleFunc("/api/asr/deps/install", s.withAuth(s.handleAPIDepsInstall))
 	s.mux.HandleFunc("/api/asr/deps/status", s.withAuth(s.handleAPIDepsStatus))
+	s.mux.HandleFunc("/api/wake", s.withAuth(s.handleAPIWake))
+	s.mux.HandleFunc("/api/wake/toggle", s.withAuth(s.handleAPIWakeToggle))
+	s.mux.HandleFunc("/api/wake/test", s.withAuth(s.handleAPIWakeTest))
+	s.mux.HandleFunc("/api/wake/pending", s.withAuth(s.handleAPIWakePending))
+	s.mux.HandleFunc("/api/wake/ack", s.withAuth(s.handleAPIWakeAck))
 
 	// 根路径重定向
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +153,9 @@ func (s *Server) routes() {
 		http.NotFound(w, r)
 	})
 }
+
+// SetWakeEngine 注入/替换唤醒引擎（测试与延迟初始化用）。
+func (s *Server) SetWakeEngine(e *wake.Engine) { s.wakeEngine = e }
 
 // Handler 返回 http.Handler。
 func (s *Server) Handler() http.Handler { return s.mux }

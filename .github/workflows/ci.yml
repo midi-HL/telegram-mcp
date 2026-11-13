@@ -41,7 +41,9 @@ jobs:
             ./internal/autoreply/... \
             ./internal/config/... \
             ./internal/dto/... \
-            ./internal/trust/...
+            ./internal/telegram/... \
+            ./internal/trust/... \
+            ./internal/wake/...
 
       - name: Build (linux/amd64)
         env:

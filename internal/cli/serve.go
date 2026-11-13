@@ -15,6 +15,7 @@ import (
 	tgmcp "github.com/midi-HL/telegram-mcp/internal/mcp"
 	tgclient "github.com/midi-HL/telegram-mcp/internal/telegram"
 	"github.com/midi-HL/telegram-mcp/internal/trust"
+	"github.com/midi-HL/telegram-mcp/internal/wake"
 	"github.com/midi-HL/telegram-mcp/internal/webui"
 )
 
@@ -30,15 +31,32 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		port        = fs.Int("port", 0, "HTTP 端口（--http 时生效）")
 		httpToken   = fs.String("token", "", "HTTP Bearer token（留空则不鉴权，仅限本机）")
 		readyWait   = fs.Duration("ready-timeout", 60*time.Second, "等待账号就绪的超时时间")
+		wakeOn      = fs.Bool("wake", false, "开启新消息唤醒 Agent（覆盖配置里的 wake.enabled）")
+		wakeOff     = fs.Bool("no-wake", false, "关闭新消息唤醒 Agent")
+		wakeMode    = fs.String("wake-mode", "", "唤醒模式：notify / sampling / webhook / all")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *wakeOn && *wakeOff {
+		return fmt.Errorf("--wake 与 --no-wake 不能同时使用")
 	}
 
 	cfg, err := a.resolveConfig()
 	if err != nil {
 		return err
 	}
+	// 命令行临时覆盖（不写入 config.json）
+	if *wakeOn {
+		cfg.Wake.Enabled = true
+	}
+	if *wakeOff {
+		cfg.Wake.Enabled = false
+	}
+	if *wakeMode != "" {
+		cfg.Wake.Mode = *wakeMode
+	}
+	config.NormalizeWake(&cfg.Wake)
 
 	// ★ 不因"没有账号"而拒绝启动：Web UI 必须先起来，让用户在浏览器里
 	//   填 API 凭据 + 扫码/手机号登录。账号就绪与否不影响 Web UI。
@@ -85,8 +103,12 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 
 	// 信任体系
 	var guard *trust.Guard
+	var adminChecker interface {
+		IsAdmin(ctx context.Context, userID int64) (bool, error)
+	}
 	if store != nil {
 		guard = trust.New(store)
+		adminChecker = store
 	}
 
 	// 自动回复引擎
@@ -100,6 +122,15 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		})
 	}
 
+	// 新消息唤醒引擎：在 MCP server 创建前注入 provider，HTTP/stdio 都能主动通知。
+	wakeEngine := wake.New(wake.Options{
+		Config:    cfg.Wake,
+		Logger:    a.Logger,
+		Admins:    adminChecker,
+		Server:    tgmcp.CurrentServer,
+		Transport: map[bool]string{true: "http", false: "stdio"}[*useHTTP],
+	})
+
 	deps := &tgmcp.Deps{
 		Config:         cfg,
 		Pool:           pool,
@@ -108,11 +139,13 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		DefaultAccount: defaultAccount,
 		Guard:          guard,
 		AutoReply:      autoReplyEngine,
+		Wake:           wakeEngine,
 	}
 
 	// ★ Web UI 立即启动（独立端口），不等待任何账号
 	if cfg.WebUI.Enabled {
-		ui, err := webui.NewWithAutoReply(cfg, store, pool, autoReplyEngine, a.Logger)
+		var ui *webui.Server
+		ui, err = webui.NewWithAutoReply(cfg, store, pool, autoReplyEngine, wakeEngine, a.Logger)
 		if err != nil {
 			a.Logger.Error("Web UI 初始化失败", zap.Error(err))
 		} else {
@@ -177,9 +210,11 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 						zap.String("account", st.acc.Name),
 						zap.Int64("user_id", status.UserID),
 						zap.String("username", status.Username))
-					// 注册新消息处理器（供自动回复）
+					// ★ 自动回复 + Agent 唤醒共用同一个 dispatcher handler。
+					//   gotd 的 OnNewMessage 是覆盖式注册，分两次注册会让其中一个静默失效。
+					var handlers []tgclient.MessageHandler
 					if autoReplyEngine != nil {
-						tgclient.RegisterMessageHandler(st.acc, func(hctx context.Context, ev tgclient.MessageEvent) {
+						handlers = append(handlers, func(hctx context.Context, ev tgclient.MessageEvent) {
 							autoReplyEngine.Handle(hctx, autoreply.Event{
 								ChatID:   ev.ChatID,
 								MsgID:    ev.MsgID,
@@ -188,8 +223,20 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 								Text:     ev.Text,
 								IsOut:    ev.Out,
 							})
-						}, a.Logger)
+						})
 					}
+					handlers = append(handlers, func(hctx context.Context, ev tgclient.MessageEvent) {
+						wakeEngine.Handle(hctx, wake.Event{
+							Account:  st.acc.Name,
+							ChatID:   ev.ChatID,
+							MsgID:    ev.MsgID,
+							SenderID: ev.SenderID,
+							Sender:   ev.Sender,
+							Text:     ev.Text,
+							Out:      ev.Out,
+						})
+					})
+					tgclient.RegisterMessageHandlers(st.acc, a.Logger, handlers...)
 					<-ctx.Done()
 					return nil
 				})
@@ -228,7 +275,8 @@ func (a *App) runServe(ctx context.Context, args []string) error {
 		addr := fmt.Sprintf("%s:%d", cfg.WebUI.Host, httpPort)
 		a.Logger.Info("启动 MCP 服务", zap.String("transport", "http"),
 			zap.String("addr", addr),
-			zap.Bool("auth", *httpToken != ""))
+			zap.Bool("auth", *httpToken != ""),
+			zap.Bool("wake", cfg.Wake.Enabled))
 		h := tgmcp.NewHTTPServer(deps, *httpToken)
 		err = h.RunHTTP(ctx, addr, a.Logger)
 		cancel()

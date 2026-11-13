@@ -34,7 +34,7 @@ func (h *HTTPServer) Handler() http.Handler {
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server { return h.server },
 		&mcp.StreamableHTTPOptions{
-			Stateless:      false, // 保留会话状态以支持 progress/elicitation
+			Stateless:      false, // 保留会话状态以支持主动唤醒通知
 			SessionTimeout: 30 * time.Minute,
 		},
 	)

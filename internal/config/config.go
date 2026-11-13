@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 // Account 表示一个 Telegram 账号的配置。
@@ -67,6 +66,62 @@ func (a *ASR) ResolveCLIPath() string {
 	return a.CLIPath
 }
 
+// Wake 是「新消息唤醒 Agent」的配置。
+type Wake struct {
+	Enabled bool `json:"enabled"`
+	// Mode: notify / sampling / webhook / all。
+	// notify 推送 MCP notifications/message；sampling 向 Agent 发一条消息；
+	// webhook 调用外部 HTTP；all 同时执行三种。
+	Mode string `json:"mode"`
+	// IncludeOut 是否连自己发出的消息也唤醒（默认 false）。
+	IncludeOut bool `json:"include_out"`
+	// IncludeText 是否在通知里携带消息正文（默认 true，外部内容会包装）。
+	IncludeText bool `json:"include_text"`
+	// 消息正文最多保留的字符数。
+	MaxTextRunes int `json:"max_text_runes,omitempty"`
+	// 同一会话两次唤醒之间的最小间隔（秒）。
+	DebounceSeconds int `json:"debounce_seconds,omitempty"`
+	// Webhook 地址（mode=webhook/all 时使用）。
+	WebhookURL string `json:"webhook_url,omitempty"`
+	// Webhook Bearer token。
+	WebhookToken string `json:"webhook_token,omitempty"`
+	// 交付给 Agent 的提示语模板，留空使用默认。
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// DefaultWake 返回唤醒配置的默认值。
+func DefaultWake() Wake {
+	return Wake{
+		Enabled:         false,
+		Mode:            "notify",
+		IncludeText:     true,
+		MaxTextRunes:    280,
+		DebounceSeconds: 2,
+	}
+}
+
+// NormalizeWake 修正唤醒配置中的空值/非法值。
+func NormalizeWake(w *Wake) {
+	if w == nil {
+		return
+	}
+	d := DefaultWake()
+	if w.Mode == "" {
+		w.Mode = d.Mode
+	}
+	switch w.Mode {
+	case "notify", "sampling", "webhook", "all":
+	default:
+		w.Mode = d.Mode
+	}
+	if w.MaxTextRunes <= 0 {
+		w.MaxTextRunes = d.MaxTextRunes
+	}
+	if w.DebounceSeconds < 0 {
+		w.DebounceSeconds = d.DebounceSeconds
+	}
+}
+
 // Config 是完整配置。
 type Config struct {
 	// DataDir 是数据根目录（session、缓存数据库、配置）。
@@ -79,6 +134,8 @@ type Config struct {
 	WebUI WebUI `json:"webui"`
 	// ASR 配置。
 	ASR ASR `json:"asr"`
+	// Wake 是新消息唤醒 Agent 的配置。
+	Wake Wake `json:"wake"`
 }
 
 // DefaultDataDir 返回平台默认数据目录。
@@ -108,6 +165,7 @@ func Default() *Config {
 		ASR: ASR{
 			Backend: "none",
 		},
+		Wake: DefaultWake(),
 	}
 }
 
@@ -135,6 +193,15 @@ func Load(dataDir string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("解析配置 %s: %w", path, err)
 	}
+	// 区分「旧配置没有 wake 字段」与「用户显式写了 false」：
+	// 前者给完整默认值（小白开箱即用），后者尊重用户意图。
+	var raw struct {
+		Wake json.RawMessage `json:"wake"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("解析配置 %s: %w", path, err)
+	}
+	hasWake := len(raw.Wake) > 0 && string(raw.Wake) != "null"
 	if cfg.DataDir == "" {
 		cfg.DataDir = dataDir
 	}
@@ -150,6 +217,17 @@ func Load(dataDir string) (*Config, error) {
 	}
 	if cfg.ASR.Backend == "" {
 		cfg.ASR.Backend = "none"
+	}
+	if !hasWake {
+		cfg.Wake = DefaultWake()
+	} else {
+		// 只修正空/非法值，不因零值布尔字段把用户显式关闭的设置重置。
+		NormalizeWake(&cfg.Wake)
+	}
+	// 强制收录内置凭据：空值补默认，显式值保持可替换。
+	// 环境变量不写进配置，撤销后会自动回到文件里的值。
+	for i := range cfg.Accounts {
+		FillBuiltinCredentials(&cfg.Accounts[i])
 	}
 	return &cfg, nil
 }
@@ -181,10 +259,12 @@ func (c *Config) Account(name string) *Account {
 }
 
 // UpsertAccount 新增或更新账号配置。
+// api_id / api_hash 留空时自动写入公开内置默认凭据。
 func (c *Config) UpsertAccount(acc Account) {
 	if acc.SessionDir == "" {
 		acc.SessionDir = filepath.Join(c.DataDir, "sessions", acc.Name)
 	}
+	FillBuiltinCredentials(&acc)
 	for i := range c.Accounts {
 		if c.Accounts[i].Name == acc.Name {
 			c.Accounts[i] = acc
@@ -194,17 +274,21 @@ func (c *Config) UpsertAccount(acc Account) {
 	c.Accounts = append(c.Accounts, acc)
 }
 
-// EnvCredentials 从环境变量读取 API 凭据（TELEGRAM_API_ID / TELEGRAM_API_HASH）。
-// 返回 ok=false 表示环境变量不完整。
-func EnvCredentials() (id int, hash string, ok bool) {
-	idStr := os.Getenv("TELEGRAM_API_ID")
-	hash = os.Getenv("TELEGRAM_API_HASH")
-	if idStr == "" || hash == "" {
-		return 0, "", false
+// EffectiveCredentials 返回指定账号实际生效的凭据及来源。
+// 账号不存在时返回全局解析结果。
+func (c *Config) EffectiveCredentials(name string) Credentials {
+	if acc := c.Account(name); acc != nil {
+		return ResolveCredentials(acc.APIID, acc.APIHash)
 	}
-	n, err := strconv.Atoi(idStr)
-	if err != nil || n <= 0 {
-		return 0, "", false
+	return ResolveCredentials(0, "")
+}
+
+// BuiltinCredentialsUsed 判断是否至少有一个账号仍在使用内置凭据。
+func (c *Config) BuiltinCredentialsUsed() bool {
+	for i := range c.Accounts {
+		if IsBuiltinCredentials(c.Accounts[i].APIID, c.Accounts[i].APIHash) {
+			return true
+		}
 	}
-	return n, hash, true
+	return false
 }

@@ -38,7 +38,8 @@
       });
       const d = await res.json();
       if (res.ok) {
-        okBox.textContent = '凭据已保存（账号：' + d.account + '）';
+        const source = d.env_override ? '环境变量覆盖' : (d.is_builtin ? '内置官方凭据' : '自定义凭据');
+        okBox.textContent = '已保存（账号：' + d.account + '，当前使用' + source + '，api_id=' + d.api_id + '）';
         okBox.hidden = false;
         loadCredentials();
       } else {
@@ -57,16 +58,18 @@
       const res = await fetch('/api/credentials');
       const d = await res.json();
       const status = document.getElementById('cred-status');
+      const prefix = d.env_override
+        ? '✅ 当前由环境变量覆盖（api_id=' + d.effective_api_id + '）；'
+        : '✅ 已公开内置默认凭据（api_id=' + d.builtin_api_id + '），无需申请；';
       if (!res.ok || !d.accounts || !d.accounts.length) {
-        status.textContent = '尚未配置 API 凭据';
+        status.textContent = prefix + '可直接进行第 2 步登录';
         return;
       }
       const lines = d.accounts.map(function (a) {
-        return a.name + ' — api_id=' + a.api_id + (a.api_hash_set ? ' ✓' : ' ✗');
+        return a.name + ' — api_id=' + a.api_id + (a.is_builtin ? '（内置）' : (a.api_hash_set ? '（自定义）' : ' ✗'));
       });
-      status.textContent = '已配置：' + lines.join('；');
+      status.textContent = prefix + '账号：' + lines.join('；');
       if (!document.getElementById('cred-api-id').value) {
-        document.getElementById('cred-api-id').value = d.accounts[0].api_id;
         document.getElementById('cred-account').value = d.accounts[0].name;
       }
     } catch (e) {
@@ -74,6 +77,43 @@
     }
   }
   loadCredentials();
+
+  // 恢复内置凭据
+  const credReset = document.getElementById('cred-reset');
+  if (credReset) {
+    credReset.addEventListener('click', async function () {
+      document.getElementById('cred-api-id').value = '';
+      document.getElementById('cred-api-hash').value = '';
+      const errBox = document.getElementById('cred-error');
+      const okBox = document.getElementById('cred-success');
+      errBox.hidden = true;
+      try {
+        const res = await fetch('/api/credentials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            account: document.getElementById('cred-account').value.trim(),
+            api_id: 0,
+            api_hash: ''
+          })
+        });
+        const d = await res.json();
+        if (res.ok) {
+          okBox.textContent = d.env_override
+            ? '已写入内置值；当前仍由环境变量覆盖，删除环境变量后生效'
+            : '已恢复内置官方凭据，可直接登录';
+          okBox.hidden = false;
+          loadCredentials();
+        } else {
+          errBox.textContent = d.error || '恢复失败';
+          errBox.hidden = false;
+        }
+      } catch (err) {
+        errBox.textContent = '网络错误：' + err.message;
+        errBox.hidden = false;
+      }
+    });
+  }
 
   // --- 扫码登录 ---
   let qrSessionId = '';

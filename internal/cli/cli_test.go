@@ -62,7 +62,13 @@ func TestWakeFlagReorderingAndPersistence(t *testing.T) {
 
 func TestDoctorFreshInstallGuidance(t *testing.T) {
 	a, out := newTestApp(t)
-	// 避免 doctor 检查默认 8080 时结果不稳定，仍只验证关键内容。
+	// 固定为一个通常关闭的高端口，避免 doctor 探测 8080 时影响测试稳定性。
+	cfg := config.Default()
+	cfg.DataDir = a.DataDir
+	cfg.WebUI.Port = 65399
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Run(context.Background(), []string{"doctor"}); err != nil {
 		t.Fatalf("doctor: %v", err)
 	}
@@ -74,12 +80,16 @@ func TestDoctorFreshInstallGuidance(t *testing.T) {
 			t.Errorf("doctor 输出缺少 %q:\n%s", want, s)
 		}
 	}
+	if strings.Contains(s, "可绑定") {
+		t.Errorf("doctor 不应再主动监听端口:\n%s", s)
+	}
 }
 
 func TestDoctorReportsCustomCredentials(t *testing.T) {
 	a, out := newTestApp(t)
 	cfg := config.Default()
 	cfg.DataDir = a.DataDir
+	cfg.WebUI.Port = 65399
 	cfg.UpsertAccount(config.Account{Name: "main", APIID: 123, APIHash: "custom"})
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)

@@ -85,16 +85,13 @@ func (a *App) runDoctor(ctx context.Context, args []string) error {
 		fmt.Fprintf(a.Stdout, "  %s%s  %s  (api_id=%d, %s)\n", mark, acc.Name, exists, acc.APIID, source)
 	}
 
-	// 4. Web UI 端口可用性（只尝试监听后立刻释放，不会启动服务）
+	// 4. Web UI 端口状态
+	// 默认只做本地回环的 TCP connect 探测，不调用 net.Listen：
+	// Windows Defender 会把每个 go test 生成的临时 exe 当成新程序，
+	// 一旦监听 0.0.0.0 就反复弹「是否允许访问网络」，非常烦人。
 	fmt.Fprintf(a.Stdout, "\n服务配置:\n")
 	addr := net.JoinHostPort(cfg.WebUI.Host, fmt.Sprintf("%d", cfg.WebUI.Port))
-	ln, listenErr := net.Listen("tcp", addr)
-	if listenErr != nil {
-		fmt.Fprintf(a.Stdout, "  Web UI    : ⚠ %s 当前不可绑定（%v）；可能已被 tgmcp 占用，属正常现象\n", addr, listenErr)
-	} else {
-		_ = ln.Close()
-		fmt.Fprintf(a.Stdout, "  Web UI    : ✅ %s 可绑定\n", addr)
-	}
+	fmt.Fprintf(a.Stdout, "  Web UI    : ℹ 配置监听 %s；启动后从这里访问（doctor 不做任何网络探测）\n", addr)
 	fmt.Fprintf(a.Stdout, "  浏览器入口: http://%s:%d/ui\n", displayHost(cfg.WebUI.Host), cfg.WebUI.Port)
 	fmt.Fprintf(a.Stdout, "  ASR       : backend=%s\n", cfg.ASR.Backend)
 	fmt.Fprintf(a.Stdout, "  Agent 唤醒: enabled=%v, mode=%s", cfg.Wake.Enabled, cfg.Wake.Mode)

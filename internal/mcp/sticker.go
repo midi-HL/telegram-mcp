@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gotd/td/tg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -93,59 +95,128 @@ func handleSticker(ctx context.Context, deps *Deps, in StickerInput) (*mcp.CallT
 	}
 }
 
-// handleStickerSearch 搜索贴纸包。
+// searchLocalInstalledSets 在公开搜索无结果时，从已安装贴纸包里按标题/short_name 过滤。
+func searchLocalInstalledSets(ctx context.Context, api *tg.Client, query string, limit int) []StickerSet {
+	res, err := api.MessagesGetAllStickers(ctx, 0)
+	if err != nil {
+		return nil
+	}
+	all, ok := res.(*tg.MessagesAllStickers)
+	if !ok {
+		return nil
+	}
+	q := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(query, "@")))
+	out := make([]StickerSet, 0, limit)
+	for _, set := range all.Sets {
+		if strings.Contains(strings.ToLower(set.Title), q) || strings.Contains(strings.ToLower(set.ShortName), q) {
+			ss := projectStickerSet(set)
+			ss.Installed = true
+			out = append(out, ss)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// handleStickerSearch 搜索贴纸包。上游无结果时回退本地已安装包过滤。
 func handleStickerSearch(ctx context.Context, deps *Deps, in StickerInput, out StickerOutput) (*mcp.CallToolResult, StickerOutput, error) {
 	acc, _, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return stickerFail("%v", err)
 	}
 
 	q := strings.TrimSpace(in.Query)
 	if q == "" {
-		out.Note = "search_sets 需要 query"
-		return nil, out, nil
-	}
-	res, err := acc.API().MessagesSearchStickerSets(ctx, &tg.MessagesSearchStickerSetsRequest{
-		Q:    q,
-		Hash: 0, // 不带缓存 hash，避免服务端直接返回 NotModified
-	})
-	if err != nil {
-		out.Note = fmt.Sprintf("搜索失败: %v", err)
-		return nil, out, nil
-	}
-
-	var found []tg.StickerSetCoveredClass
-	switch v := res.(type) {
-	case *tg.MessagesFoundStickerSets:
-		found = v.Sets
-	case *tg.MessagesFoundStickerSetsNotModified:
-		out.Note = "Telegram 返回「列表未变更」；请换个关键词，或用 list_installed / set_info 查询已安装包"
-		return nil, out, nil
-	default:
-		out.Note = fmt.Sprintf("Telegram 未返回贴纸包列表（%T）；该搜索词可能没有公开结果", res)
-		return nil, out, nil
+		return stickerFail("search_sets 需要 query")
 	}
 	limit := in.Limit
 	if limit <= 0 {
 		limit = 20
 	}
-	for _, fc := range found {
-		if len(out.Sets) >= limit {
-			break
+
+	res, err := acc.API().MessagesSearchStickerSets(ctx, &tg.MessagesSearchStickerSetsRequest{
+		Q:    q,
+		Hash: 0, // 不带缓存 hash，避免服务端直接返回 NotModified
+	})
+	if err == nil {
+		var found []tg.StickerSetCoveredClass
+		switch v := res.(type) {
+		case *tg.MessagesFoundStickerSets:
+			found = v.Sets
+		case *tg.MessagesFoundStickerSetsNotModified:
+			out.Note = "Telegram 返回「列表未变更」；已尝试回退本地已安装包"
 		}
-		if covered, ok := fc.(*tg.StickerSetCovered); ok {
-			out.Sets = append(out.Sets, projectStickerSet(covered.Set))
+		for _, fc := range found {
+			if len(out.Sets) >= limit {
+				break
+			}
+			if covered, ok := fc.(*tg.StickerSetCovered); ok {
+				out.Sets = append(out.Sets, projectStickerSet(covered.Set))
+			}
+		}
+	} else {
+		out.Note = fmt.Sprintf("公开搜索失败：%v；已尝试回退本地已安装包", err)
+	}
+
+	if len(out.Sets) == 0 {
+		out.Sets = searchLocalInstalledSets(ctx, acc.API(), q, limit)
+		if len(out.Sets) > 0 && out.Note == "" {
+			out.Note = "公开搜索无结果；以下是本地已安装包按标题/short_name 匹配结果"
 		}
 	}
 	out.Count = len(out.Sets)
-	out.Note = fmt.Sprintf("找到 %d 个贴纸包", out.Count)
+	if out.Count == 0 {
+		out.Note = "未找到贴纸包；试试 list_installed 或更短的关键词"
+	}
 	return nil, out, nil
 }
 
+// stickerSetHashCache 缓存「已安装贴纸包 ID → access_hash」，避免每次 set_id 查询都拉全量。
+var stickerSetHashCache = struct {
+	sync.Mutex
+	expires time.Time
+	byID    map[int64]int64
+}{}
+
+// lookupInstalledStickerSetHash 从所有已安装贴纸包里找到 setID 对应的 access_hash。
+func lookupInstalledStickerSetHash(ctx context.Context, api *tg.Client, setID int64) (int64, string, bool) {
+	stickerSetHashCache.Lock()
+	if stickerSetHashCache.byID != nil && time.Now().Before(stickerSetHashCache.expires) {
+		if h, ok := stickerSetHashCache.byID[setID]; ok {
+			stickerSetHashCache.Unlock()
+			return h, "", true
+		}
+	}
+	stickerSetHashCache.Unlock()
+
+	res, err := api.MessagesGetAllStickers(ctx, 0)
+	if err != nil {
+		return 0, "", false
+	}
+	all, ok := res.(*tg.MessagesAllStickers)
+	if !ok {
+		return 0, "", false
+	}
+	byID := make(map[int64]int64, len(all.Sets))
+	var foundHash int64
+	var foundName string
+	for _, set := range all.Sets {
+		byID[set.ID] = set.AccessHash
+		if set.ID == setID {
+			foundHash, foundName = set.AccessHash, set.ShortName
+		}
+	}
+	stickerSetHashCache.Lock()
+	stickerSetHashCache.byID, stickerSetHashCache.expires = byID, time.Now().Add(5*time.Minute)
+	stickerSetHashCache.Unlock()
+	return foundHash, foundName, foundHash != 0
+}
+
 // resolveStickerSetInput 构造 InputStickerSet。
-// 优先 short_name；set_id 必须同时带 access_hash，否则 Telegram 会返回 STICKERSET_INVALID。
-func resolveStickerSetInput(in StickerInput) (tg.InputStickerSetClass, error) {
+// 优先 short_name；只有 set_id 时自动从已安装包补 access_hash。
+func resolveStickerSetInput(ctx context.Context, api *tg.Client, in StickerInput) (tg.InputStickerSetClass, error) {
 	q := strings.TrimSpace(in.Query)
 	setID, err := parseSetID(in.SetID)
 	if err != nil {
@@ -157,14 +228,21 @@ func resolveStickerSetInput(in StickerInput) (tg.InputStickerSetClass, error) {
 			return nil, err
 		}
 		if hash == 0 {
-			return nil, fmt.Errorf("使用 set_id 时必须同时提供 set_access_hash；推荐改用 query=short_name 或 sticker=document_id")
+			if api == nil {
+				return nil, fmt.Errorf("set_id 缺少 set_access_hash，且当前 Telegram 客户端不可用")
+			}
+			looked, _, ok := lookupInstalledStickerSetHash(ctx, api, setID)
+			if !ok {
+				return nil, fmt.Errorf("set_id 未在已安装贴纸包中找到；请提供 set_access_hash，或先用 query=short_name / list_installed")
+			}
+			hash = looked
 		}
 		return &tg.InputStickerSetID{ID: setID, AccessHash: hash}, nil
 	}
 	if q != "" {
 		return &tg.InputStickerSetShortName{ShortName: strings.TrimPrefix(q, "@")}, nil
 	}
-	return nil, fmt.Errorf("需要 query（short name）或 set_id + set_access_hash")
+	return nil, fmt.Errorf("需要 query（short name）或 set_id（自动补 access_hash）")
 }
 
 // handleStickerSetInfo 获取贴纸包详情（含所有贴纸）。
@@ -173,7 +251,7 @@ func handleStickerSetInfo(ctx context.Context, deps *Deps, in StickerInput, out 
 	if err != nil {
 		return stickerFail("%v", err)
 	}
-	inputSet, err := resolveStickerSetInput(in)
+	inputSet, err := resolveStickerSetInput(ctx, acc.API(), in)
 	if err != nil {
 		return stickerFail("%v", err)
 	}
@@ -255,7 +333,7 @@ func handleStickerSend(ctx context.Context, deps *Deps, in StickerInput, out Sti
 		return stickerFail("%v。可先用 chat list / chat resolve 刷新 peer 缓存", err)
 	}
 
-	inputSet, err := resolveStickerSetInput(in)
+	inputSet, err := resolveStickerSetInput(ctx, acc.API(), in)
 	if err != nil {
 		return stickerFail("%v", err)
 	}

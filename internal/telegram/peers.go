@@ -17,9 +17,9 @@ import (
 type PeerResolver struct {
 	api *tg.Client
 
-	mu    sync.RWMutex
-	cache map[int64]tg.InputPeerClass // 按 peer ID 缓存
-	byName map[string]int64           // 用户名 → ID
+	mu     sync.RWMutex
+	cache  map[int64]tg.InputPeerClass // 按 peer ID 缓存
+	byName map[string]int64            // 用户名 → ID
 }
 
 // NewPeerResolver 创建解析器。
@@ -93,8 +93,16 @@ func (r *PeerResolver) Resolve(ctx context.Context, input string) (tg.InputPeerC
 		return r.resolveUsername(ctx, name)
 	}
 
-	// 数字 ID
+	// 数字 ID：先按原始 ID 查缓存，再按 -100 标记的 realID 查缓存。
 	if id, err := strconv.ParseInt(input, 10, 64); err == nil {
+		if p, ok := r.cachedPeer(id); ok {
+			return p, nil
+		}
+		if real := normalizePeerID(id); real != id {
+			if p, ok := r.cachedPeer(real); ok {
+				return p, nil
+			}
+		}
 		return r.resolveID(ctx, id)
 	}
 
@@ -165,27 +173,32 @@ func (r *PeerResolver) resolveUsername(ctx context.Context, username string) (tg
 	return nil, fmt.Errorf("找不到 @%s（可能是用户名不存在或已更改）", username)
 }
 
-// resolveID 通过数字 ID 解析。需要先拉取对话列表建立映射。
+// resolveID 通过数字 ID 解析。正数不一定是用户：本项目 chat list
+// 也会输出正数的基础群/超级群 ID，因此统一用 getDialogs 实体判断类型。
 func (r *PeerResolver) resolveID(ctx context.Context, id int64) (tg.InputPeerClass, error) {
-	// 负数：群/频道（Telegram 约定）
-	if id < 0 {
-		// 超级群/频道 ID 形如 -100xxxxxxxxxx
-		realID := -id
-		if realID > 1000000000000 {
-			realID -= 1000000000000
-		}
-		// 尝试从对话列表里找
-		if peer, err := r.findInDialogs(ctx, realID); err == nil {
-			return peer, nil
-		}
-		return nil, fmt.Errorf("找不到 ID %d 的群/频道（需要先与它有对话）", id)
-	}
-
-	// 正数：用户
-	if peer, err := r.findInDialogs(ctx, id); err == nil {
+	realID := normalizePeerID(id)
+	if peer, err := r.findInDialogs(ctx, realID); err == nil {
 		return peer, nil
 	}
-	return nil, fmt.Errorf("找不到 ID %d 的用户（需要先与它有对话，或改用 @用户名）", id)
+	return nil, fmt.Errorf("找不到 ID %d 对应的会话/peer；可先用 chat resolve 或 chat list 刷新 peer 缓存", id)
+}
+
+func normalizePeerID(id int64) int64 {
+	if id >= 0 {
+		return id
+	}
+	realID := -id
+	if realID > 1000000000000 {
+		realID -= 1000000000000
+	}
+	return realID
+}
+
+func (r *PeerResolver) cachedPeer(id int64) (tg.InputPeerClass, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.cache[id]
+	return p, ok
 }
 
 // findInDialogs 从对话列表里查找 peer 并缓存 access_hash。
@@ -243,9 +256,12 @@ func (r *PeerResolver) findInDialogs(ctx context.Context, targetID int64) (tg.In
 			}
 		}
 
-		// 取下一页游标：用最后一个对话的 TopMessage 作为 offsetID
+		// 取下一页游标：用最后一个真实 dialog 的 peer + TopMessage。
 		dialogs, ok := dialogsFrom(res)
-		if !ok || len(dialogs) < pageSize {
+		if !ok || len(dialogs) == 0 {
+			break
+		}
+		if _, complete := res.(*tg.MessagesDialogs); complete || len(dialogs) < pageSize {
 			break
 		}
 		last := dialogs[len(dialogs)-1]
@@ -253,15 +269,14 @@ func (r *PeerResolver) findInDialogs(ctx context.Context, targetID int64) (tg.In
 		if peer == nil {
 			break
 		}
-		offsetID = topMsg
-		offsetDate = 0
-		r.mu.RLock()
-		p, found := r.cache[PeerIDFromClass(peer)]
-		r.mu.RUnlock()
-		if !found {
+		lastID := PeerIDFromClass(peer)
+		if p, found := r.cachedPeer(lastID); found {
+			offsetPeer = p
+		} else {
 			break
 		}
-		offsetPeer = p
+		offsetID = topMsg
+		offsetDate = 0
 	}
 
 	return nil, fmt.Errorf("对话列表里没有 ID %d", targetID)

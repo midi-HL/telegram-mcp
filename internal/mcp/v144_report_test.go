@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -38,17 +39,17 @@ func TestFolderPeerIDSchemaConsistent(t *testing.T) {
 }
 
 func TestResolveStickerSetInput(t *testing.T) {
-	if _, err := resolveStickerSetInput(StickerInput{SetID: "5240184525769671681"}); err == nil {
-		t.Error("set_id 缺 access_hash 时应明确报错，避免 STICKERSET_INVALID")
+	if _, err := resolveStickerSetInput(context.Background(), nil, StickerInput{SetID: "5240184525769671681"}); err == nil {
+		t.Error("set_id 未命中已安装包且无 hash 时应明确报错")
 	}
-	in, err := resolveStickerSetInput(StickerInput{Query: "HotCherry"})
+	in, err := resolveStickerSetInput(context.Background(), nil, StickerInput{Query: "HotCherry"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := in.(*tg.InputStickerSetShortName); !ok {
 		t.Fatalf("short_name 应使用 InputStickerSetShortName, got %T", in)
 	}
-	in, err = resolveStickerSetInput(StickerInput{SetID: "123", SetHash: "456"})
+	in, err = resolveStickerSetInput(context.Background(), nil, StickerInput{SetID: "123", SetHash: "456"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,4 +73,9 @@ func TestFindStickerDocumentByIDAndEmoji(t *testing.T) {
 	if d, err := findStickerDocument(ms, ""); err != nil || d.ID != 111 {
 		t.Fatalf("空 selector 应取第一张: %v %#v", err, d)
 	}
+}
+
+// v1.4.6 的 P0：fetchDialogs 返回值必须带完整 InputPeer，否则 StorePeer 永远收不到。
+func TestDialogItemCarriesInputPeer(t *testing.T) {
+	_ = dialogItem{InputPeer: &tg.InputPeerChannel{ChannelID: 1, AccessHash: 2}}
 }

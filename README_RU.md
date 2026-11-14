@@ -562,6 +562,15 @@ tgmcp serve --http --port 8093 --token ваш_случайный_длинный_
 
 <a id="tools"></a>
 
+## Исправления по полевому отчёту v1.4.6
+
+- **history / chat info читают peer из list/resolve**: `chat list` и `chat resolve` сохраняют полный `InputPeer` (включая `access_hash`) в кэше; числовые ID сначала проверяют кэш и больше не называют положительные ID групп «пользователями».
+- **Версия MCP совпадает с бинарником**: ответы `system` и MCP server implementation используют версию, внедрённую в Release, вместо постоянного `dev`.
+- **Один шаг для sticker по set_id**: если передан только `set_id`, сервер сам находит `access_hash` среди установленных наборов; `set_info` и `send` работают сразу. В результате есть `short_name`, `access_hash`, `document_id`.
+- **QR-вход**: используется реальный `Expires()` токена Telegram; добавлены кнопка «重新生成二维码» / regenerate и копируемая ссылка `tg://login`.
+- **`search_sets`**: при пустом публичном поиске или NotModified выполняется локальный поиск по установленным наборам (заголовок / `short_name`).
+- **Фильтры Wake всё ещё ждут E2E на реальном аккаунте**: код и unit-тесты покрывают chat/folder/sender; рекомендуется одна проверка на целевой папке.
+
 ## ID, ошибки и стикеры (v1.4.5)
 
 - **Все внешние ID — строки**: `id` в `chat list` / `chat resolve` / `chat folders`, `chat/to` в `message`, `set_id` / `document_id` в `sticker`. Это исключает потерю точности float64.

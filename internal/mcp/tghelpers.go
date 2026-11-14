@@ -127,7 +127,8 @@ func fetchDialogs(ctx context.Context, api *tg.Client, target int, offset int) (
 				item.Title = displayName(u)
 				item.Username, _ = u.GetUsername()
 				item.AccessHash, item.CanSend = u.AccessHash, true
-				lastPeer = &tg.InputPeerUser{UserID: u.ID, AccessHash: u.AccessHash}
+				item.InputPeer = &tg.InputPeerUser{UserID: u.ID, AccessHash: u.AccessHash}
+				lastPeer = item.InputPeer
 			case *tg.PeerChat:
 				c, ok := chatMap[peer.ChatID].(*tg.Chat)
 				if !ok {
@@ -136,7 +137,8 @@ func fetchDialogs(ctx context.Context, api *tg.Client, target int, offset int) (
 				}
 				item.ID, item.Type = c.ID, dto.ChatTypeBasicGroup
 				item.Title, item.MemberCount, item.CanSend = c.Title, c.ParticipantsCount, true
-				lastPeer = &tg.InputPeerChat{ChatID: c.ID}
+				item.InputPeer = &tg.InputPeerChat{ChatID: c.ID}
+				lastPeer = item.InputPeer
 			case *tg.PeerChannel:
 				ch := channelMap[peer.ChannelID]
 				if ch == nil {
@@ -155,10 +157,14 @@ func fetchDialogs(ctx context.Context, api *tg.Client, target int, offset int) (
 					item.MemberCount = participants
 				}
 				item.CanSend = ch.Megagroup
-				lastPeer = &tg.InputPeerChannel{ChannelID: ch.ID, AccessHash: ch.AccessHash}
+				item.InputPeer = &tg.InputPeerChannel{ChannelID: ch.ID, AccessHash: ch.AccessHash}
+				lastPeer = item.InputPeer
 			}
 			if item.ID == 0 || seen[item.ID] {
 				continue
+			}
+			if item.InputPeer == nil {
+				item.InputPeer = lastPeer
 			}
 			seen[item.ID] = true
 			if msg := msgMap[dialog.TopMessage]; msg != nil {

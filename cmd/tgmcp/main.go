@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/midi-HL/telegram-mcp/internal/cli"
+	tgmcp "github.com/midi-HL/telegram-mcp/internal/mcp"
 )
 
 // version 由 ldflags 注入：-X main.version=v1.0.0
@@ -35,6 +36,9 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Release 只注入 main.version；同步给 MCP 层，避免 system 工具仍显示 dev。
+	tgmcp.Version = version
 
 	app := cli.New(version, logger)
 	if err := app.Run(ctx, os.Args[1:]); err != nil {

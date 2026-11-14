@@ -571,6 +571,15 @@ tgmcp serve --http --port 8093 --token あなた自身のランダムな長い�
 
 <a id="tools"></a>
 
+## v1.4.6 実測修正
+
+- **list/resolve で見える peer を history/chat info から直接読めるように修正**：`chat list` / `chat resolve` が完全な `InputPeer`（`access_hash` 含む）をキャッシュへ保存し、数字 ID はまずキャッシュを参照します。正数のグループ ID を「ユーザー」と誤表示しません。
+- **MCP の version をバイナリと一致**：`system` 応答と MCP server implementation が Release 注入版番号を使い、固定 `dev` を返しません。
+- **set_id だけでスタンプ検索/送信可能**：`set_id` のみの場合、インストール済みセットから `access_hash` を自動補完します。`set_info` / `send` ともに一段階で利用でき、結果に `short_name` / `access_hash` / `document_id` を含みます。
+- **QR ログイン**：Telegram token の実際の `Expires()` を使用し、「QR 再生成」ボタンとコピー可能な `tg://login` リンクを追加しました。
+- **`search_sets`**：公開検索が 0 件または NotModified の場合、インストール済みセットをタイトル / `short_name` でローカル検索します。
+- **Wake フィルターは実アカウント E2E 待ち**：コードと単体テストは chat/folder/sender を網羅しています。対象フォルダーで一度実測してください。
+
 ## ID・エラー・スタンプの使い方（v1.4.5）
 
 - **外部に見える ID はすべて文字列**：`chat list` / `chat resolve` / `chat folders` の `id`、`message` の `chat/to`、`sticker` の `set_id` / `document_id` は文字列です。JSON number の float64 精度落ちを防ぎます。

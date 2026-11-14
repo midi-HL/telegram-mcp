@@ -119,40 +119,48 @@
   let qrSessionId = '';
   let qrPollTimer = null;
 
-  const qrStartBtn = document.getElementById('qr-start');
-  if (qrStartBtn) {
-    qrStartBtn.addEventListener('click', async function () {
-      const errBox = document.getElementById('qr-error');
-      errBox.hidden = true;
-      const btn = this;
-      btn.disabled = true;
+  async function startQR() {
+    const errBox = document.getElementById('qr-error');
+    errBox.hidden = true;
+    if (qrPollTimer) clearTimeout(qrPollTimer);
+    if (qrSessionId) {
       try {
-        const res = await fetch('/api/login/qr', {
+        await fetch('/api/login/cancel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            account: document.getElementById('cred-account').value.trim(),
-            api_id: parseInt(document.getElementById('cred-api-id').value, 10) || 0,
-            api_hash: document.getElementById('cred-api-hash').value.trim()
-          })
+          body: JSON.stringify({ id: qrSessionId })
         });
-        const d = await res.json();
-        if (!res.ok) {
-          errBox.textContent = d.error || '启动失败';
-          errBox.hidden = false;
-          return;
-        }
-        qrSessionId = d.id;
-        document.getElementById('qr-box').hidden = false;
-        pollQR();
-      } catch (err) {
-        errBox.textContent = '网络错误：' + err.message;
+      } catch (e) { /* 忽略 */ }
+    }
+    try {
+      const res = await fetch('/api/login/qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account: document.getElementById('cred-account').value.trim(),
+          api_id: parseInt(document.getElementById('cred-api-id').value, 10) || 0,
+          api_hash: document.getElementById('cred-api-hash').value.trim()
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        errBox.textContent = d.error || '启动失败';
         errBox.hidden = false;
-      } finally {
-        btn.disabled = false;
+        return;
       }
-    });
+      qrSessionId = d.id;
+      document.getElementById('qr-box').hidden = false;
+      pollQR();
+    } catch (err) {
+      errBox.textContent = '网络错误：' + err.message;
+      errBox.hidden = false;
+    }
   }
+
+  const qrStartBtn = document.getElementById('qr-start');
+  if (qrStartBtn) qrStartBtn.addEventListener('click', startQR);
+  const qrRefreshBtn = document.getElementById('qr-refresh');
+  if (qrRefreshBtn) qrRefreshBtn.addEventListener('click', startQR);
 
   async function pollQR() {
     if (!qrSessionId) return;
@@ -166,8 +174,9 @@
       if (d.qr_url) {
         renderQR(d.qr_url);
         const left = d.qr_expires ? Math.max(0, d.qr_expires - Math.floor(Date.now() / 1000)) : 0;
-        document.getElementById('qr-hint').textContent =
-          left > 0 ? '等待扫码… 二维码 ' + left + ' 秒后自动刷新，请用手机 Telegram 立即扫码' : '等待扫码… 二维码即将刷新';
+        document.getElementById('qr-hint').textContent = left > 0
+          ? '等待扫码… 本码还剩 ' + left + ' 秒；超时点「重新生成二维码」或直接打开下方 tg:// 链接'
+          : '二维码已过期，请点「重新生成二维码」';
       }
       if (d.state === 'success') {
         document.getElementById('qr-hint').textContent =

@@ -567,6 +567,15 @@ Client configuration example:
 
 <a id="tools"></a>
 
+## v1.4.6 field-test fixes
+
+- **history / chat info now read peers visible in list/resolve**: `chat list` and `chat resolve` store complete `InputPeer` values (including `access_hash`) in the peer cache; numeric IDs check that cache first and no longer mislabel positive group IDs as users.
+- **MCP version matches the binary**: `system` responses and the MCP server implementation now use the release-injected version instead of a fixed `dev`.
+- **One-step sticker lookup/send by set_id**: when only `set_id` is supplied, the service looks up `access_hash` from installed sticker sets; both `set_info` and `send` work. Results include `short_name`, `access_hash`, and `document_id`.
+- **QR login**: uses the Telegram token's real `Expires()` countdown, with a "regenerate QR" button and a copyable `tg://login` link.
+- **`search_sets`**: falls back to installed sticker sets filtered by title / `short_name` when public search returns no results or NotModified.
+- **Wake filters still await real-account E2E**: code and unit tests cover chat/folder/sender filters; run one real-account check on the target folder.
+
 ## IDs, errors, and sticker usage (v1.4.5)
 
 - **All external IDs are strings**: `id` in `chat list` / `chat resolve` / `chat folders`, `chat/to` in `message`, and `set_id` / `document_id` in `sticker`. This avoids float64 precision loss.

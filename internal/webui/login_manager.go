@@ -249,7 +249,10 @@ func (m *LoginManager) runQR(ctx context.Context, sess *LoginSession, acc *tgcli
 	runErr := acc.Client().Run(ctx, func(ctx context.Context) error {
 		loggedIn := qrlogin.OnLoginToken(acc.Dispatcher())
 		_, authErr := acc.Client().QR().Auth(ctx, loggedIn, func(ctx context.Context, token qrlogin.Token) error {
-			exp := time.Now().Add(30 * time.Second)
+			exp := token.Expires()
+			if exp.IsZero() || exp.Before(time.Now()) {
+				exp = time.Now().Add(30 * time.Second)
+			}
 			sess.setQR(token.URL(), exp)
 			m.logger.Info("生成二维码", zap.String("account", sess.account))
 			return nil

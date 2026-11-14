@@ -547,6 +547,15 @@ tgmcp serve --http --port 8093 --token 你自己的随机长字符串
 
 <a id="tools"></a>
 
+## v1.4.6 实测修复说明
+
+- **history/chat info 可直接读 list/resolve 可见的会话**：`chat list` 与 `chat resolve` 会把完整 `InputPeer`（含 `access_hash`）写入 peer 缓存；数字 ID 先查缓存，不再把正数群 ID 误报成「用户」。
+- **MCP 版本号与二进制一致**：`system` 响应和 MCP server implementation 的 `version` 现在同步 Release ldflags 注入版本，不再固定 `dev`。
+- **贴纸按 set_id 一步查询/发送**：只提供 `set_id` 时，服务自动从已安装包补 `access_hash`；`set_info` 和 `send` 都可用，结果仍包含 `short_name` / `access_hash` / `document_id`。
+- **二维码**：使用 Telegram token 的真实 `Expires()` 倒计时；页面提供「重新生成二维码」按钮和可复制 `tg://login` 链接。
+- **`search_sets`**：公开搜索无结果或 NotModified 时，自动回退到已安装贴纸包按标题 / `short_name` 过滤。
+- **Wake 过滤待真实账号复验**：代码与单测已覆盖 chat/folder/sender 过滤，真实账号 E2E 仍建议在目标分类开启一次验证。
+
 ## ID、错误与贴纸用法（v1.4.5）
 
 - **所有对外 ID 都用字符串**：`chat list` / `chat resolve` / `chat folders` 的 `id`、`message` 的 `chat/to`、`sticker` 的 `set_id` / `document_id` 均传字符串。避免 JSON number 的 float64 精度丢失。

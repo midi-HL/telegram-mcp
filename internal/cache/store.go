@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -146,6 +147,7 @@ func (s *Store) ListChats(ctx context.Context, limit int) ([]dto.ChatBrief, erro
 			return nil, err
 		}
 		c.Type = dto.ChatType(typ)
+		c.IDString = strconv.FormatInt(c.ID, 10)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -170,6 +172,7 @@ func (s *Store) GetChat(ctx context.Context, id int64) (*dto.ChatFull, error) {
 		return nil, err
 	}
 	c.Type = dto.ChatType(typ)
+	c.IDString = strconv.FormatInt(c.ID, 10)
 	c.Username = username
 	c.About = about
 	c.Muted = muted != 0

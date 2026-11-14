@@ -571,6 +571,20 @@ tgmcp serve --http --port 8093 --token あなた自身のランダムな長い�
 
 <a id="tools"></a>
 
+## ID・エラー・スタンプの使い方（v1.4.5）
+
+- **外部に見える ID はすべて文字列**：`chat list` / `chat resolve` / `chat folders` の `id`、`message` の `chat/to`、`sticker` の `set_id` / `document_id` は文字列です。JSON number の float64 精度落ちを防ぎます。
+- **失敗は MCP error**：`message history/search`、`chat info/mark_read/folders`、スタンプ取得/送信の失敗は `isError: true` を返し、「成功 + note」には見せません。
+- **chat list が peer キャッシュを更新**：一覧の `access_hash` を resolver に保存するため、その後は文字列 ID で `message history` / `chat info` を読めます。
+- **chat resolve**：`chat {"action":"resolve","chat":"タイトル关键字またはID文字列"}` で候補を返し、同名グループの識別にも使えます。
+- **メタデータ欠落を明示**：最後のメッセージが返らない場合は `metadata_missing: true` を付け、`at=0` / `last=""` を実データとして扱いません。
+- **短いレート制限を内部処理**：`chat list/unread/resolve` は 5 秒キャッシュを共有し、`FLOOD_WAIT ≤ 5s` は 1 回待って再試行します。
+- **推奨スタンプ手順**：
+  - インストール済み一覧：`sticker {"action":"list_installed"}`（`id` / `access_hash` / `short_name` を返します）；
+  - 詳細：`sticker {"action":"set_info","query":"HotCherry"}`（short name 推奨）；
+  - ID 指定には `set_id` と `set_access_hash` の両方が必要です。欠けると `STICKERSET_INVALID` ではなく明確なエラーになります；
+  - 送信：`sticker {"action":"send","chat":"<chat_id文字列>","query":"HotCherry","sticker":"<document_id文字列またはemoji>"}`。`sticker` 省略で先頭のスタンプを送ります。
+
 ## ツール一覧（13 個）
 
 | ツール | 主な action |

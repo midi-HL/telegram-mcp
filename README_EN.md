@@ -567,6 +567,20 @@ Client configuration example:
 
 <a id="tools"></a>
 
+## IDs, errors, and sticker usage (v1.4.5)
+
+- **All external IDs are strings**: `id` in `chat list` / `chat resolve` / `chat folders`, `chat/to` in `message`, and `set_id` / `document_id` in `sticker`. This avoids float64 precision loss.
+- **Failures use MCP errors**: `message history/search`, `chat info/mark_read/folders`, and sticker lookup/send return `isError: true` instead of a success-shaped result with a note.
+- **chat list refreshes peer cache**: dialogs are stored in the resolver with their `access_hash`, so `message history` / `chat info` work directly by string ID.
+- **chat resolve**: `chat {"action":"resolve","chat":"title keyword or ID string"}` returns candidates and refreshes peer cache; useful for duplicate group titles.
+- **Missing metadata is explicit**: `metadata_missing: true` marks dialogs whose last message was not returned; do not treat `at=0` / `last=""` as real data.
+- **Short rate limiting is handled**: `chat list/unread/resolve` share a 5-second dialog cache; `FLOOD_WAIT ≤ 5s` is waited once and retried internally.
+- **Recommended sticker flow**:
+  - installed sets: `sticker {"action":"list_installed"}` returns `id`, `access_hash`, `short_name`;
+  - set details: `sticker {"action":"set_info","query":"HotCherry"}` (short name preferred);
+  - ID lookup requires both `set_id` and `set_access_hash`; otherwise the tool errors clearly instead of `STICKERSET_INVALID`;
+  - send: `sticker {"action":"send","chat":"<chat_id string>","query":"HotCherry","sticker":"<document_id string or emoji>"}`; omit `sticker` for the first sticker.
+
 ## Tool list (13 tools)
 
 | Tool | Main actions |

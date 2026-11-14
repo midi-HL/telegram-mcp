@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/gotd/td/tg"
@@ -140,6 +141,7 @@ func (s *Server) handleAPIChats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if brief.ID != 0 {
+			brief.IDString = strconv.FormatInt(brief.ID, 10)
 			list = append(list, brief)
 		}
 	}
@@ -568,7 +570,6 @@ func fileExistsUI(p string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-
 // handleAPIASRModels 列出可选模型。
 func (s *Server) handleAPIASRModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"models": availableModels})
@@ -621,7 +622,6 @@ func (s *Server) handleAPIASREnvironment(w http.ResponseWriter, r *http.Request)
 	env := CheckEnvironment(modelDir, cliPath)
 	writeJSON(w, http.StatusOK, env)
 }
-
 
 // handleAPIDepsInstall 启动依赖安装（ffmpeg / sherpa）。
 func (s *Server) handleAPIDepsInstall(w http.ResponseWriter, r *http.Request) {

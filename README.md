@@ -547,6 +547,20 @@ tgmcp serve --http --port 8093 --token 你自己的随机长字符串
 
 <a id="tools"></a>
 
+## ID、错误与贴纸用法（v1.4.5）
+
+- **所有对外 ID 都用字符串**：`chat list` / `chat resolve` / `chat folders` 的 `id`、`message` 的 `chat/to`、`sticker` 的 `set_id` / `document_id` 均传字符串。避免 JSON number 的 float64 精度丢失。
+- **失败走 MCP error**：`message history/search`、`chat info/mark_read/folders`、贴纸取包/发送等失败会返回 `isError: true`，不再伪装成「成功 + note」。
+- **chat list 会刷新 peer 缓存**：列表返回里的会话会同步写入 resolver 的 `access_hash`，之后 `message history` 和 `chat info` 可直接按字符串 ID 读取。
+- **chat resolve**：`chat {"action":"resolve","chat":"标题关键字或ID字符串"}` 会返回候选会话并刷新 peer 缓存，解决同名群难区分的问题。
+- **元数据缺失有标记**：`getDialogs` 未给最后消息时返回 `metadata_missing: true`，不要再把 `at=0` / `last=""` 当成真实数据；请用 `message history` 读取。
+- **短时限流自动处理**：`chat list/unread/resolve` 共用 5 秒 dialogs 缓存；`FLOOD_WAIT ≤ 5s` 内部等待一次再重试。
+- **贴纸推荐用法**：
+  - 列已安装包：`sticker {"action":"list_installed"}`，返回 `id` / `access_hash` / `short_name`；
+  - 查包详情：`sticker {"action":"set_info","query":"HotCherry"}`（short name 优先）；
+  - 按 ID 查包：`set_id` 必须配 `set_access_hash`，否则会明确报错，避免 `STICKERSET_INVALID`；
+  - 发贴纸：`sticker {"action":"send","chat":"<chat_id字符串>","query":"HotCherry","sticker":"<document_id字符串或emoji>"}`；`sticker` 留空发送第一张。
+
 ## 工具清单（13 个）
 
 | 工具 | 主要 action |

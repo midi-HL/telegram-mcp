@@ -32,12 +32,16 @@ const (
 
 // ChatBrief 是聊天列表的精简表示（5 字段，约 120 字节）。
 type ChatBrief struct {
-	ID       int64    `json:"id"`
+	ID       int64    `json:"-"`
+	IDString string   `json:"id"`
 	Title    string   `json:"title"`
 	Type     ChatType `json:"type"`
 	Unread   int      `json:"unread,omitempty"`
 	LastText string   `json:"last,omitempty"`
 	LastAt   int64    `json:"at,omitempty"`
+	// MetadataMissing 表示 getDialogs 未返回该会话的最后消息元数据，
+	// 此时 last/at 不适用，调用方应用 message history 读取。
+	MetadataMissing bool `json:"metadata_missing,omitempty"`
 }
 
 // ChatFull 是聊天详情（expand=["full"] 时返回）。
@@ -174,9 +178,10 @@ type Folder struct {
 }
 
 // FolderPeer 是聊天文件夹里明确包含/置顶的一个会话。
-// ID 用字符串输出，避免大整数在 JSON / MCP 通道里丢失精度。
+// ID 用字符串输出，避免大整数在 JSON / MCP 通道里丢失精度，
+// 且字段类型与 MCP 自动生成的 schema 保持一致。
 type FolderPeer struct {
-	ID     int64  `json:"id,string"`
+	ID     string `json:"id"`
 	Title  string `json:"title,omitempty"`
 	Type   string `json:"type,omitempty"`
 	Pinned bool   `json:"pinned,omitempty"`

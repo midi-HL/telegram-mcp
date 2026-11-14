@@ -280,6 +280,16 @@ func dialogPeerAndTop(d tg.DialogClass) (tg.PeerClass, int) {
 	}
 }
 
+// StorePeer 显式缓存一个 InputPeer。chat list / getDialogs 拿到 access_hash 后
+// 应立即调用，避免 message history / chat info 再按裸 ID 猜类型。
+func (r *PeerResolver) StorePeer(peer tg.InputPeerClass, username string) {
+	id := PeerID(peer)
+	if id == 0 {
+		return
+	}
+	r.store(id, peer, username)
+}
+
 // store 写入缓存。
 func (r *PeerResolver) store(id int64, peer tg.InputPeerClass, username string) {
 	r.mu.Lock()

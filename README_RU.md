@@ -562,6 +562,20 @@ tgmcp serve --http --port 8093 --token ваш_случайный_длинный_
 
 <a id="tools"></a>
 
+## ID, ошибки и стикеры (v1.4.5)
+
+- **Все внешние ID — строки**: `id` в `chat list` / `chat resolve` / `chat folders`, `chat/to` в `message`, `set_id` / `document_id` в `sticker`. Это исключает потерю точности float64.
+- **Ошибки через MCP error**: `message history/search`, `chat info/mark_read/folders`, поиск/отправка стикеров возвращают `isError: true`, а не «успех + note».
+- **chat list обновляет peer-кэш**: диалоги сохраняются в resolver вместе с `access_hash`, поэтому `message history` / `chat info` работают по строковому ID.
+- **chat resolve**: `chat {"action":"resolve","chat":"часть заголовка или ID строкой"}` возвращает кандидатов и обновляет кэш; помогает различать группы с одинаковым названием.
+- **Отсутствующие метаданные помечаются**: `metadata_missing: true` означает, что последнее сообщение не вернулось; `at=0` / `last=""` не считаются реальными данными.
+- **Короткие лимиты обрабатываются**: `chat list/unread/resolve` используют 5-секундный кэш диалогов; `FLOOD_WAIT ≤ 5s` ожидается один раз и повторяется внутри сервера.
+- **Рекомендуемый сценарий стикеров**:
+  - установленные наборы: `sticker {"action":"list_installed"}` возвращает `id`, `access_hash`, `short_name`;
+  - детали: `sticker {"action":"set_info","query":"HotCherry"}` (предпочтительно short name);
+  - для `set_id` обязателен `set_access_hash`; без него будет явная ошибка вместо `STICKERSET_INVALID`;
+  - отправка: `sticker {"action":"send","chat":"<chat_id строкой>","query":"HotCherry","sticker":"<document_id строкой или emoji>"}`; без `sticker` отправляется первый стикер.
+
 ## Список инструментов (13)
 
 | Инструмент | Основные action |

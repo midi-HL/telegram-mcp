@@ -3,8 +3,12 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 
 	"github.com/midi-HL/telegram-mcp/internal/dto"
 )
@@ -12,6 +16,7 @@ import (
 // dialogItem 是从 gotd 对话对象提取的中间结构。
 type dialogItem struct {
 	ID          int64
+	InputPeer   tg.InputPeerClass
 	Title       string
 	Type        dto.ChatType
 	Username    string
@@ -162,9 +167,6 @@ func fetchDialogs(ctx context.Context, api *tg.Client, target int, offset int) (
 				item.LastAt = int64(dialog.TopMessage)
 			}
 			out = append(out, item)
-			if v, ok := dialogPeerToInput(dialog.Peer); ok {
-				lastPeer = v
-			}
 			offsetID = dialog.TopMessage
 			if msg := msgMap[dialog.TopMessage]; msg != nil {
 				offsetDate = msg.Date
@@ -191,11 +193,11 @@ func fetchDialogs(ctx context.Context, api *tg.Client, target int, offset int) (
 func dialogPeerToInput(p tg.PeerClass) (tg.InputPeerClass, bool) {
 	switch v := p.(type) {
 	case *tg.PeerUser:
-		return &tg.InputPeerUser{UserID: v.UserID}, true
+		return nil, false // access_hash 必须由调用方用实体补齐
 	case *tg.PeerChat:
 		return &tg.InputPeerChat{ChatID: v.ChatID}, true
 	case *tg.PeerChannel:
-		return &tg.InputPeerChannel{ChannelID: v.ChannelID}, true
+		return nil, false // access_hash 必须由调用方用实体补齐
 	default:
 		return nil, false
 	}
@@ -436,7 +438,7 @@ func fetchFolders(ctx context.Context, api *tg.Client) ([]dto.Folder, error) {
 					continue
 				}
 				seen[id] = true
-				item.Peers = append(item.Peers, dto.FolderPeer{ID: id, Type: typ, Pinned: pinned})
+				item.Peers = append(item.Peers, dto.FolderPeer{ID: strconv.FormatInt(id, 10), Type: typ, Pinned: pinned})
 			}
 		}
 		for _, p := range df.ExcludePeers {
@@ -447,4 +449,51 @@ func fetchFolders(ctx context.Context, api *tg.Client) ([]dto.Folder, error) {
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// fetchDialogsWithRetry 对短时 FLOOD_WAIT 内部等待一次，避免把 3 秒限流直接甩给调用方。
+func fetchDialogsWithRetry(ctx context.Context, api *tg.Client, target, offset int) ([]dialogItem, error) {
+	items, err := fetchDialogs(ctx, api, target, offset)
+	if err == nil {
+		return items, nil
+	}
+	if d, ok := tgerr.AsFloodWait(err); ok && d > 0 && d <= 5*time.Second {
+		select {
+		case <-time.After(d + 200*time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return fetchDialogs(ctx, api, target, offset)
+	}
+	return nil, err
+}
+
+// 短时 dialogs 缓存：chat list / unread 连续调用共用一次 getDialogs 结果，
+// 避免新会话首次请求节奏撞上 Telegram 的短时 FLOOD_WAIT。
+var dialogCache = struct {
+	sync.Mutex
+	key     string
+	items   []dialogItem
+	expires time.Time
+}{}
+
+func fetchDialogsCached(ctx context.Context, api *tg.Client, target, offset int) ([]dialogItem, error) {
+	key := fmt.Sprintf("%p:%d:%d", api, target, offset)
+	now := time.Now()
+	dialogCache.Lock()
+	if dialogCache.key == key && now.Before(dialogCache.expires) {
+		items := append([]dialogItem(nil), dialogCache.items...)
+		dialogCache.Unlock()
+		return items, nil
+	}
+	dialogCache.Unlock()
+
+	items, err := fetchDialogsWithRetry(ctx, api, target, offset)
+	if err != nil {
+		return nil, err
+	}
+	dialogCache.Lock()
+	dialogCache.key, dialogCache.items, dialogCache.expires = key, append([]dialogItem(nil), items...), time.Now().Add(5*time.Second)
+	dialogCache.Unlock()
+	return items, nil
 }

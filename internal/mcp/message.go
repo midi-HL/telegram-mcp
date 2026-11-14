@@ -46,7 +46,7 @@ type MessageOutput struct {
 func registerMessageTools(s *mcp.Server, deps *Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "message",
-		Description: "消息收发。action: send 发送 / edit 编辑 / delete 删除 / forward 转发 / search 搜索 / history 历史 / react 反应 / pin 置顶",
+		Description: "消息收发。chat/to 均为字符串 ID 或 @username；失败返回 MCP error。action: send / edit / delete / forward / search / history / react / pin",
 		Annotations: &mcp.ToolAnnotations{Title: "消息", ReadOnlyHint: false},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in MessageInput) (*mcp.CallToolResult, MessageOutput, error) {
 		return handleMessage(ctx, deps, in)
@@ -92,13 +92,11 @@ func handleSend(ctx context.Context, deps *Deps, in MessageInput, out MessageOut
 	}
 	acc, resolver, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v", err)
 	}
 	peer, err := resolver.Resolve(ctx, in.Chat)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v。可先用 chat resolve 或 chat list 刷新 peer 缓存", err)
 	}
 
 	req := &tg.MessagesSendMessageRequest{
@@ -140,13 +138,11 @@ func handleEdit(ctx context.Context, deps *Deps, in MessageInput, out MessageOut
 	}
 	acc, resolver, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v", err)
 	}
 	peer, err := resolver.Resolve(ctx, in.Chat)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v。可先用 chat resolve 或 chat list 刷新 peer 缓存", err)
 	}
 
 	res, err := acc.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
@@ -172,13 +168,11 @@ func handleDelete(ctx context.Context, deps *Deps, in MessageInput, out MessageO
 	}
 	acc, resolver, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v", err)
 	}
 	peer, err := resolver.Resolve(ctx, in.Chat)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v。可先用 chat resolve 或 chat list 刷新 peer 缓存", err)
 	}
 
 	// 频道/超级群用 channels.deleteMessages，其他用 messages.deleteMessages
@@ -273,8 +267,7 @@ func handleSearch(ctx context.Context, deps *Deps, in MessageInput, out MessageO
 
 	res, err := acc.API().MessagesSearch(ctx, req)
 	if err != nil {
-		out.Note = fmt.Sprintf("搜索失败: %v", err)
-		return nil, out, nil
+		return messageFail("搜索失败: %v", err)
 	}
 	msgs, users := extractMessages(res)
 	out.Messages = projectMessages(msgs, in.Expand)
@@ -293,13 +286,11 @@ func handleHistory(ctx context.Context, deps *Deps, in MessageInput, out Message
 	}
 	acc, resolver, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v", err)
 	}
 	peer, err := resolver.Resolve(ctx, in.Chat)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v。可先用 chat resolve 或 chat list 刷新 peer 缓存", err)
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -315,8 +306,7 @@ func handleHistory(ctx context.Context, deps *Deps, in MessageInput, out Message
 		OffsetID: in.Before,
 	})
 	if err != nil {
-		out.Note = fmt.Sprintf("读取历史失败: %v", err)
-		return nil, out, nil
+		return messageFail("读取历史失败: %v", err)
 	}
 	msgs, users, chats := extractMessagesFull(res)
 	out.Messages = projectMessagesWithEntities(msgs, users, chats, in.Expand)
@@ -344,13 +334,11 @@ func handleReact(ctx context.Context, deps *Deps, in MessageInput, out MessageOu
 	}
 	acc, resolver, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v", err)
 	}
 	peer, err := resolver.Resolve(ctx, in.Chat)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v。可先用 chat resolve 或 chat list 刷新 peer 缓存", err)
 	}
 
 	_, err = acc.API().MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
@@ -375,13 +363,11 @@ func handlePin(ctx context.Context, deps *Deps, in MessageInput, out MessageOutp
 	}
 	acc, resolver, _, err := deps.withAccount(ctx, in.Account)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v", err)
 	}
 	peer, err := resolver.Resolve(ctx, in.Chat)
 	if err != nil {
-		out.Note = err.Error()
-		return nil, out, nil
+		return messageFail("%v。可先用 chat resolve 或 chat list 刷新 peer 缓存", err)
 	}
 
 	_, err = acc.API().MessagesUpdatePinnedMessage(ctx, &tg.MessagesUpdatePinnedMessageRequest{
@@ -744,4 +730,10 @@ func buildReplyRef(msgID int, original *tg.Message, users map[int64]*tg.User) *d
 	}
 
 	return ref
+}
+
+// messageFail 返回 MCP 错误结果，避免把读取失败伪装成「成功 + note」。
+func messageFail(format string, args ...any) (*mcp.CallToolResult, MessageOutput, error) {
+	r, _ := fail(format, args...)
+	return r, MessageOutput{}, nil
 }
